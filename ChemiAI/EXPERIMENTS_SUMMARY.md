@@ -316,7 +316,7 @@ submission_transductive_neighbor_target_blend.csv
 
 - `solution_v2.ipynb` — основной CatBoost/top-k путь, полезен как объяснимый baseline.
 - `solution_clustering.ipynb` — clustering/neighbor логика и объяснение, почему она лучше классического top-k.
-- `solution_best.ipynb` — чистый воспроизводимый пайплайн текущего best-сабмита.
+- `solution_best.ipynb` — self-contained пайплайн без чтения готовых submission CSV; baseline внутри ноутбука воспроизводится через `KMeans(k=4) + HistGradientBoosting`.
 - `EXPERIMENTS_SUMMARY.md` — этот отчет.
 - `submission_transductive_neighbor_target_blend.csv` — текущий лучший сабмит.
 
