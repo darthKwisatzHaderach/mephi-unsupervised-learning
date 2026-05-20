@@ -2,25 +2,36 @@
 
 ## TL;DR для команды
 
-Текущий лучший публичный score: **298.48843**.
+Текущий лучший публичный score: **284.60804**.
 
-Лучший файл: `submission_transductive_neighbor_target_blend.csv`.
+Лучший файл: `submission_ic50_size_catboost_w25.csv`.
 
 Формула лучшего сабмита:
 
 ```text
-IC50 = clustering baseline
-CC50 = 40% clustering baseline + 60% transductive neighbor
-SI   = 70% clustering baseline + 30% transductive neighbor
+IC50 = 75% clustering (KMeans k=4 + HGB) + 25% CatBoost(size descriptors)
+CC50 = 40% clustering + 60% transductive PCA20 KNN5
+SI_direct = 70% clustering + 30% SI-модель (HGB loss=absolute_error)
+SI_final  = 0.35 * SI_direct + 0.65 * (CC50 / IC50)   # eps=1e-3
 ```
 
-Главный вывод: лучший прирост дали не CatBoost-тюнинг и не feature importance, а **локальная геометрия молекул** через KNN/PCA. Особенно полезным оказался сигнал для `CC50`.
+Предыдущие вехи:
+- **`submission_combo_exp3_inv_a35.csv` → 292.05889** (предыдущий best)
+- `submission_exp3_si_absolute_robust.csv` → **293.09177**
+- `submission_transductive_neighbor_target_blend.csv` → **298.48843**
+
+Главный вывод: второй крупный скачок дал **CatBoost на size-дескрипторах для IC50** (−7.45 public при −1…−3 OOF). Ранее SI robust head (−6.4) при неизменном IC50.
 
 Что не отправлять:
 
 - `submission_si_tail_aware.csv` — public score `353.06336`, ветка закрыта.
 - `submission_si_topology_blend50.csv` — public score `302.12458`, ветка закрыта.
-- `submission_cc50_specialist_target_blend.csv` — public score `299.22851`, хуже текущего best.
+- `submission_cc50_specialist_target_blend.csv` — public score `299.22851`.
+- `submission_cc50_specialist_blend.csv` — public score `299.10772` (чуть лучше старого specialist, хуже best на `0.62`).
+- `submission_stack_ridge.csv` — public score `317.29305`, ветка закрыта.
+- `submission_exp2_nonlinear_geometry_cc50.csv` — `308.01234`.
+- `submission_exp5_multitask_mlp_ratio_si.csv` — `360.14158`, жёсткий `SI=CC50/IC50` + MLP, ветка закрыта.
+- `submission_e34_ic50cc4_si3.csv` — `293.71572`, exp4 IC50/CC50 + exp3 SI хуже чистого exp3.
 - Все `submission_clustering_public_k64_blend_10/15/20.csv` — `k64`-направление ухудшило public уже на `5%`.
 
 ## Данные и метрика
@@ -53,7 +64,20 @@ SI = CC50 / IC50
 - `303.87592` — дальнейшее усиление neighbor.
 - `302.93165` — `CC50=24%`, `SI=12%` neighbor.
 - `300.82888` — target-вариант raw neighbor.
-- **`298.48843` — transductive neighbor target blend, текущий best.**
+- **`284.60804` — `submission_ic50_size_catboost_w25.csv`, текущий best (май 2026).**
+- `292.05889` — `submission_combo_exp3_inv_a35.csv` (предыдущий best).
+- `292.11970` — `submission_combo_exp3_inv_a45.csv`.
+- `292.16381` — `submission_combo_exp3_inv_a50.csv`.
+- `292.27921` — `submission_combo_exp3_inv_a60.csv`.
+- `293.09177` — `submission_exp3_si_absolute_robust.csv`.
+- `296.70802` — `submission_exp4_cluster_cv_blend.csv`.
+- `296.77745` — `submission_exp1_si_invariant_alpha70.csv`.
+- `298.48843` — `submission_transductive_neighbor_target_blend.csv` (предыдущий best).
+- `299.10772` — `submission_cc50_specialist_blend.csv`.
+- `308.01234` — `submission_exp2_nonlinear_geometry_cc50.csv`.
+- `317.29305` — `submission_stack_ridge.csv`.
+- `360.14158` — `submission_exp5_multitask_mlp_ratio_si.csv`.
+- `293.71572` — `submission_e34_ic50cc4_si3.csv` (exp4 IC50/CC50 + exp3 SI, хуже exp3).
 
 ## Лучший текущий подход
 
@@ -221,14 +245,17 @@ PowerTransformer + PCA(16) + KNN(k=3, manhattan)
 CC50 RMSE = 482.39203
 ```
 
-Но public ухудшился:
+Public (май 2026, повторная проверка с весами `CC50=60%`, `SI=20%`):
 
 ```text
-submission_cc50_specialist_target_blend.csv -> 299.22851
-best                                      -> 298.48843
+submission_cc50_specialist_blend.csv        -> 299.10772  (новый)
+submission_cc50_specialist_target_blend.csv -> 299.22851  (старый)
+best (transductive neighbor blend)            -> 298.48843
 ```
 
-Вывод: ветку закрыть. Локальный OOF лучше, но public test предпочитает старый transductive-neighbor.
+Локально specialist давал −3 OOF и стабильный выигрыш по `CC50` на 3 seed, но public снова хуже best на `~0.62`. Новый файл чуть лучше старого specialist (`−0.12`), но до transductive-neighbor далеко.
+
+Вывод: **ветку закрыть окончательно**. Не тратить оставшиеся сабмиты на дальнейший тюнинг PowerTransformer/KNN для `CC50`.
 
 ### SI topology specialist
 
@@ -292,31 +319,189 @@ submission_si_tail_aware.csv -> 353.06336
 - `CC50 specialist`: ухудшил public.
 - `SI topology`: ухудшил public.
 - `SI tail-aware`: сильно ухудшил public.
+- `submission_stack_ridge.csv` (`317.29305`): Ridge meta на OOF `[clustering, transductive KNN, ridge_trans]`. Локально лучший рискованный OOF (`~518`, −15 на 3 seed), public катастрофа (+18.8 vs best). Причина: переобучение meta на train-OOF + раздувание SI на test (mean SI ~99 vs ~26 у best).
+
+## Пакет из 5 экспериментальных сабмитов (май 2026)
+
+Скрипт: `make_submission_experiments_batch.py` (нужен `umap-learn`).
+
+| Файл | Гипотеза |
+|------|----------|
+| `submission_exp1_si_invariant_alpha70.csv` | best + `SI = 0.7*SI + 0.3*CC50/IC50` |
+| `submission_exp2_nonlinear_geometry_cc50.csv` | CC50: ансамбль UMAP(16)+Isomap(12)+graph KNN; SI/IC50 как best |
+| `submission_exp3_si_absolute_robust.csv` | IC50/CC50=best; SI: HGB `loss=absolute_error` |
+| `submission_exp4_cluster_cv_blend.csv` | blend, обучение на 5 cluster-stratified подвыборках |
+| `submission_exp5_multitask_mlp_ratio_si.csv` | MLP(128,64) на IC50+CC50; `SI = CC50/IC50` |
+
+### Public scores (май 2026)
+
+| Файл | Score | Δ vs 298.49 |
+|------|-------|-------------|
+| **`submission_combo_exp3_inv_a35.csv`** | **292.05889** | **−6.43** |
+| `submission_combo_exp3_inv_a45.csv` | 292.11970 | −6.37 |
+| `submission_combo_exp3_inv_a50.csv` | 292.16381 | −6.32 |
+| `submission_combo_exp3_inv_a60.csv` | 292.27921 | −6.21 |
+| `submission_exp3_si_absolute_robust.csv` | 293.09177 | −5.40 |
+| `submission_exp4_cluster_cv_blend.csv` | 296.70802 | −1.78 |
+| `submission_exp1_si_invariant_alpha70.csv` | 296.77745 | −1.71 |
+| `submission_transductive_neighbor_target_blend.csv` | 298.48843 | — |
+| `submission_exp2_nonlinear_geometry_cc50.csv` | 308.01234 | +9.52 |
+| `submission_exp5_multitask_mlp_ratio_si.csv` | 360.14158 | +61.65 |
+
+**Выводы по пакету:**
+- **exp3 (SI robust)** — прорыв до 293.09: отдельный SI-head `absolute_error`.
+- **exp3 + inv α=0.5** — новый best **292.16**: мягкий физический `CC50/IC50` поверх robust SI (сильнее чем α=0.7 на старом best).
+- **exp4 / e34** — не смешивать IC50/CC50 с exp3.
+- **exp2 (UMAP/Isomap)** — хуже; нелинейная геометрия для CC50 на public не зашла.
+- **exp5 (жёсткий ratio + MLP)** — провал, как и раньше при агрессивном ratio.
 
 ## Что делать дальше
 
-1. Не трогать текущий best без нового независимого сигнала.
+1. **База для сабмитов:** `submission_combo_exp3_inv_a35.csv`.
 
-2. Если делать следующий эксперимент, искать новый сигнал для `CC50`, но не через закрытый `PowerTransformer + PCA16 + KNN3 manhattan`.
+2. **Тюнинг α — остановить.** Прирост `a50→a45→a35` ≈ `0.04–0.06` за сабмит; дальше `a30/a32` — лотерея, не стоит оставшихся попыток (май 2026).
+   Также: `exp3_siw25/35` на базе exp3 без invariant.
 
-3. Проверить другой transductive подход:
-   - не PCA, а UMAP/Isomap/SpectralEmbedding, если зависимости доступны;
-   - несколько transductive PCA-пространств и усреднение только по `CC50`;
-   - локальные модели внутри кластеров для `CC50`.
+3. **Не повторять:** e34 (exp4 IC50/CC50), exp2, exp5, stack_ridge, specialist.
 
-4. `SI` держать консервативно. Public явно не любит агрессивные high-tail коррекции.
+4. **Тюнинг exp3:** вес SI blend (20–40%), `epsilon`/глубина HGB, `absolute_error` vs `quantile` если появится LightGBM.
 
-5. Для финального сабмита сейчас использовать:
+5. Для воспроизведения exp3:
+
+```bash
+.venv/bin/python make_submission_experiments_batch.py  # exp3 = submission_exp3_si_absolute_robust.csv
+```
+
+## Пакет 12 combo-сабмитов (вокруг exp3)
+
+Скрипт: `make_submission_12_combos.py`.
+
+| Файл | Public | Δ vs best |
+|------|--------|-----------|
+| **`submission_combo_exp3_inv_a35.csv`** | **292.05889** | **best** |
+| `submission_combo_exp3_inv_a45.csv` | 292.11970 | +0.06 |
+| `submission_combo_exp3_inv_a50.csv` | 292.16381 | +0.10 |
+| `submission_combo_exp3_inv_a60.csv` | 292.27921 | +0.22 |
+
+| Приоритет | Файл | Идея |
+|-----------|------|------|
+| 1 | `submission_combo_exp3_inv_a50.csv` | exp3 + `SI = 0.5·SI + 0.5·CC50/IC50` |
+| 2 | `submission_combo_exp3_inv_a60.csv` | α=0.6 |
+| 3 | `submission_combo_exp3_inv_a65.csv` | α=0.65 |
+| 4 | `submission_combo_exp3_inv_a75.csv` | α=0.75 |
+| 5 | `submission_combo_exp3_inv_a80.csv` | α=0.8 |
+| 6 | `submission_combo_exp3_siw25.csv` | SI robust blend 25% |
+| 7 | `submission_combo_exp3_siw35.csv` | SI robust blend 35% |
+| 8 | `submission_combo_exp3_siw40.csv` | SI robust blend 40% |
+| 9 | `submission_combo_exp3_siw20.csv` | SI robust blend 20% |
+| 10 | `submission_combo_exp4cc_exp3si.csv` | exp4 IC50/CC50 + exp3 SI |
+| 11 | `submission_combo_exp3_si_deep.csv` | SI HGB depth=6, iter=700 |
+| 12 | `submission_combo_ens50_exp3_exp4.csv` | 50% exp3 + 50% exp4 |
+
+## Пакет exp3 + exp4 (target-wise, не мешают)
+
+Скрипт: `make_submission_exp3_exp4_combos.py`.
+
+Логика: **exp3** = лучший SI (robust HGB); **exp4** = другой train (cluster-CV) → другие IC50/CC50. Смешиваем по таргетам, не усредняем всё подряд.
+
+| Приоритет | Файл | Схема |
+|-----------|------|--------|
+| 1 | `submission_e34_ic50cc4_si3.csv` | IC50+CC50 из exp4, SI из exp3 |
+| 2 | `submission_e34_ic504_cc503_si3.csv` | IC50/CC50 50–50, SI=exp3 |
+| 3 | `submission_e34_ic504_cc503_si3_inv60.csv` | то же + inv SI α=0.6 |
+| 4–6 | `ic70cc70`, `ic30cc30`, `ic50cc40` | разные веса exp4 в IC50/CC50 |
+| 7–9 | `ic504_cc3`, `ic4_cc503`, `ic4_cc3` | один таргет от exp4 |
+| 10–12 | `si3w35`, `inv65`, `ic40 inv55` | SI-тюнинг поверх e4 IC50/CC50 |
+
+### Public (exp3+exp4)
+
+| Файл | Score | Δ vs exp3 (293.09) |
+|------|-------|---------------------|
+| **`submission_exp3_si_absolute_robust.csv`** | **293.09177** | **best** |
+| `submission_e34_ic50cc4_si3.csv` | 293.71572 | +0.62 (хуже) |
+
+**Вывод:** exp4 IC50/CC50 + exp3 SI не улучшает public. Ветку e34 IC50/CC50 закрыть; остаются комбо только вокруг SI (invariant, si_w) на базе exp3.
+
+## Предобработка solution.ipynb → solution_final (OOF, май 2026)
+
+Скрипт: `run_preprocessing_ablation.py`. Пайплайн = полный best (cluster + transductive + robust SI + inv α=0.35).
+
+| Режим | Признаков | Train | OOF score | Δ vs const_only |
+|-------|-----------|-------|-----------|-----------------|
+| **const_only** (было в final) | 192 | 751 | 530.85 | 0 |
+| **const_dup** (как solution.ipynb) | 186 | 751 | 530.67 | −0.17 |
+| const_dup + global impute | 186 | 751 | 530.05 | −0.80 |
+| agg_train (медиана по dup X) | 186 | **630** | 443.92 | артефакт OOF |
+
+**Вывод (локально):** dup-drop давал −0.17 OOF — шум.
+
+### Public (тот же файл, после dup-drop в ноутбуке)
+
+| Файл | Score | Δ vs best 292.06 |
+|------|-------|------------------|
+| `submission_combo_exp3_inv_a35.csv` (186 feat, rerun) | **293.20683** | **+1.15** (хуже) |
+
+**Ветка закрыта.** Best остаётся **292.05889** на **192** признаках (только const drop). В `solution_final.ipynb` откат к 192 feat.
+
+## Новый сигнал — IC50 size-CatBoost (май 2026) — **ПОДТВЕРЖДЁН PUBLIC**
+
+Скрипты: `run_new_signal_exploration.py`, `make_submission_ic50_size_catboost.py`, `solution_final.ipynb`.
 
 ```text
-submission_transductive_neighbor_target_blend.csv
+IC50 = 75% clustering + 25% CatBoost(size)
+CC50, SI — без изменений (exp3 + inv α=0.35)
 ```
+
+| Метрика | Значение |
+|---------|----------|
+| **Public** | **284.60804** |
+| Δ vs 292.06 | **−7.45** |
+| OOF seed=42 | 529.73 (−1.12) |
+| OOF stability | 3/3 wins (−1.1, −2.0, −2.9) |
+
+Локальный OOF занижал эффект (~−1), public дал **−7** — редкий случай, когда OOF консервативен, а LB перевёл IC50-сигнал в SI через ratio.
+
+**Не сработало в той же сессии:** dup-column drop (293.21 public), CC50 robust, cascade, exp4 blend.
+
+### Тюнинг веса CatBoost (public)
+
+| Файл | Public | Δ vs w25 best |
+|------|--------|---------------|
+| **`submission_ic50_size_catboost_w25.csv`** | **284.60804** | **best** |
+| `submission_ic50_size_catboost_w30.csv` | 285.25786 | +0.65 |
+| `submission_ic50_size_catboost_w35.csv` | 285.34732 | +0.74 |
+
+OOF favorил больший `w`, public — **оптимум w=0.25**. Ветка тюнинга `w` **закрыта** (w30, w35 хуже).
+
+## Фаза A — сетка IC50/CC50 (локально, май 2026)
+
+Скрипт: `run_phase_a_ic50_cc50_grid.py`. SI заморожен: robust HGB + invariant α=0.35 (как `solution_final`).
+
+| Кандидат | OOF seed=42 | Δ vs baseline | Stability (seeds 42/2024/7) |
+|----------|-------------|---------------|------------------------------|
+| `cc50_catboost` | **523.55** | **−7.06** | **НЕТ** — seed 2024 OOF **901** (катастрофа) |
+| `ic50_trans_20` | 530.33 | −0.29 | 3/3 wins, но −14 только на seed 2024 |
+| `cc50_trans_k3` | 529.70 | −0.91 | 2/3 wins, mean Δ ≈ −1.1 |
+| `baseline_final` | 530.61 | 0 | — |
+| `ic50_catboost` | 2692 | — | SI взрывается через ratio (мелкий IC50) |
+| `cc50_catboost` + log1p | 535.69 | +5.08 | хуже на всех seeds |
+
+**Вывод Фазы A:** жёсткий порог «mean OOF −3 и 2/3 seeds» **не выполнен**. `cc50_catboost` — ложный локальный лидер (overfit seed 42). Единственный опциональный сабмит Фазы B: `submission_phase_a_ic50_trans20.csv` (`make_submission_phase_a_ic50_trans20.py`) — слабый сигнал на seed 42, рискованный из‑за разброса по seeds.
 
 ## Файлы, которые важны
 
 - `solution_v2.ipynb` — основной CatBoost/top-k путь, полезен как объяснимый baseline.
 - `solution_clustering.ipynb` — clustering/neighbor логика и объяснение, почему она лучше классического top-k.
-- `solution_best.ipynb` — self-contained пайплайн без чтения готовых submission CSV; baseline внутри ноутбука воспроизводится через `KMeans(k=4) + HistGradientBoosting`.
+- `solution_best.ipynb` — предыдущий best (transductive blend, 298.49).
+- `solution_final.ipynb` — **текущий best** (IC50 CatBoost size + exp3 SI, 284.61).
+- `solution_local_lab.ipynb` — локальная лаборатория для OOF-сравнений, target-wise blend grid и проверки стабильности гипотез без лишних сабмитов.
+- `run_preprocessing_ablation.py` — сравнение предобработки solution.ipynb vs final.
+- `run_phase_a_ic50_cc50_grid.py` — Фаза A: сетка IC50/CC50 при замороженном SI.
+- `make_submission_phase_a_ic50_trans20.py` — опциональный сабмит IC50 20% transductive.
 - `EXPERIMENTS_SUMMARY.md` — этот отчет.
-- `submission_transductive_neighbor_target_blend.csv` — текущий лучший сабмит.
+- `submission_ic50_size_catboost_w25.csv` — **текущий лучший сабмит**.
+- `submission_combo_exp3_inv_a35.csv` — предыдущий best (292.06).
+- `submission_exp3_si_absolute_robust.csv` — база SI-head.
+- `submission_transductive_neighbor_target_blend.csv` — предыдущий best.
+- `make_submission_experiments_batch.py` — генерация exp1–exp5.
 
