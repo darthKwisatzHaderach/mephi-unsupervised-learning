@@ -2,9 +2,13 @@
 
 ## TL;DR для команды
 
-Текущий лучший публичный score: **284.60804**.
+Текущий лучший публичный score: **274.76167**.
 
-Лучший файл: `submission_ic50_size_catboost_w25.csv`.
+Лучший файл: `submission_phase_e_fr42_ic65.csv`.
+
+Предыдущий best: **275.30064** (`submission_phase_e_fr_ic50_w35.csv`).
+
+Предыдущий best: **280.13129** (`submission_phase_b_ic50_w35.csv`).
 
 Формула лучшего сабмита:
 
@@ -64,7 +68,12 @@ SI = CC50 / IC50
 - `303.87592` — дальнейшее усиление neighbor.
 - `302.93165` — `CC50=24%`, `SI=12%` neighbor.
 - `300.82888` — target-вариант raw neighbor.
-- **`284.60804` — `submission_ic50_size_catboost_w25.csv`, текущий best (май 2026).**
+- **`274.76167` — `submission_phase_e_fr42_ic65.csv`, текущий best.**
+- `274.80622` — `submission_phase_e_fr_ic50_w42.csv`.
+- `275.30064` — `submission_phase_e_fr_ic50_w35.csv`.
+- **`279.91622` — `submission_phase_b_ic50_w40.csv`.**
+- `280.13129` — `submission_phase_b_ic50_w35.csv`.
+- **`284.60804` — `submission_ic50_size_catboost_w25.csv`, предыдущий best.**
 - `292.05889` — `submission_combo_exp3_inv_a35.csv` (предыдущий best).
 - `292.11970` — `submission_combo_exp3_inv_a45.csv`.
 - `292.16381` — `submission_combo_exp3_inv_a50.csv`.
@@ -472,6 +481,219 @@ CC50, SI — без изменений (exp3 + inv α=0.35)
 | `submission_ic50_size_catboost_w35.csv` | 285.34732 | +0.74 |
 
 OOF favorил больший `w`, public — **оптимум w=0.25**. Ветка тюнинга `w` **закрыта** (w30, w35 хуже).
+
+## Локальный поиск сигнала — CC50 k=3 + CatBoost 15% (май 2026)
+
+Скрипты: `run_local_signal_search.py`, `run_stability_top_signals.py`, `make_submission_ext_k3_cat15.py`.
+
+База = `solution_final` (IC50 size CatBoost w=0.25, CC50 trans k=5 w=0.60, SI robust + inv α=0.35).
+
+| Кандидат | OOF s42 | s2024 | s7 | mean Δ vs base | wins |
+|----------|---------|-------|-----|----------------|------|
+| baseline_final | 530.20 | 538.74 | 541.74 | 0 | 0/3 |
+| cc50_trans_k3_w60 | 528.79 | 537.66 | 538.57 | **−1.89** | 3/3 |
+| cc50_k3_cat15 | 527.66 | 536.00 | 537.09 | **−3.31** | 3/3 |
+| **ext_k3_cat15** | 527.65 | 535.36 | 536.38 | **−3.76** | 3/3 |
+
+Формула **ext_k3_cat15** (поверх текущего best):
+
+```text
+IC50  = 0.75·clustering + 0.25·CatBoost(MolWt, Chi0-3, Kappa, TPSA, …)  # 18 size/shape фич
+CC50  = 0.4·clustering + 0.6·transductive_PCA20_KNN(k=3)
+      затем blend: 85%·CC50_base + 15%·CatBoost(full, log1p)
+SI    — без изменений (robust HGB + inv α=0.35)
+```
+
+**Отличие от Фазы A:** раньше `cc50_catboost` один давал OOF −7 на seed 42 и **901** на seed 2024. Здесь CatBoost только **15%** в CC50 и вместе с **k=3** transductive — стабильно лучше baseline на **всех 3 seed**.
+
+Файлы для сабмита (если останется попытка):
+
+1. `submission_ext_k3_cat15.csv` — приоритет (mean OOF −3.76)
+2. `submission_cc50_k3_cat15.csv` — проще, только CC50 (−3.31)
+
+### Public (подтверждено)
+
+| Файл | Public | Δ vs 284.61 |
+|------|--------|-------------|
+| **`submission_ext_k3_cat15.csv`** | **280.75531** | **best** |
+| `submission_ext_k3_cat20.csv` | 280.78404 | +0.03 (хуже, ветка закрыта) |
+| `submission_ic50_size_catboost_w25.csv` | 284.60804 | — |
+
+OOF mean Δ ≈ −3.76 на 3 seed — **впервые OOF и LB согласованы** (в отличие от IC50 size, где OOF занижал эффект).
+
+**Новая база для сабмитов:** `ext_k3_cat15` (IC50 ext CatBoost + CC50 k=3 + CatBoost 15%).
+
+### Тюнинг вокруг ext_k3 (локально, после public 280.76)
+
+Скрипт: `run_tune_ext_k3.py`. Сравнение с ref `ext_k3_cat15` на seeds 42/2024/7.
+
+| Кандидат | s42 | s2024 | s7 | mean Δ vs cat15 | wins |
+|----------|-----|-------|-----|-----------------|------|
+| **ext_k3_cat20** | 527.47 | 535.02 | 536.11 | **−0.26** | 3/3 |
+| ext_k3_cat18 | 527.53 | 535.14 | 536.20 | −0.17 | 3/3 |
+| ext_k3_cat15 (ref) | 527.65 | 535.36 | 536.38 | 0 | — |
+| ext_k3_w55 / w65 | — | — | — | +0.06…+0.08 | 0–1/3 |
+| k3_cat15_size (без ext IC50) | 527.66 | 536.00 | 537.09 | +0.46 | 0/3 |
+
+**Следующий сабмит (если есть попытка):** ~~`submission_ext_k3_cat20.csv`~~ — public **280.78404**, хуже cat15 на **+0.03**. **Ветка `cc50_cat_w` закрыта**, оптимум **0.15**.
+
+**Текущий best для сабмитов:** `submission_ext_k3_cat15.csv` (**280.75531**).
+
+### Ускорение локальных прогонов
+
+`run_local_signal_search.py`: кэш fold-компонентов между кандидатами (внутри одного seed), `KNN n_jobs=-1`, `CatBoost thread_count=-1`.
+
+```bash
+python run_local_signal_search.py --benchmark   # 14 cfg: 476s -> 36s (~13x)
+python run_tune_ext_k3.py                       # ~2-3 мин вместо ~25 мин на 3 seed
+```
+
+### Фаза B — SI / IC50 при frozen CC50 cat15 (локально, public ref 280.76)
+
+Скрипты: `run_phase_b_si_ic50.py`, `run_phase_b_top_combos.py`, `make_submission_phase_b.py`.
+
+CC50 заморожен: `k=3`, blend 60%, CatBoost 15%. Ref OOF (3 seed): 527.65 / 535.36 / 536.38.
+
+| Кандидат | mean Δ OOF | wins | Комментарий |
+|----------|------------|------|-------------|
+| **combo_w35_a45** | **−1.66** | 3/3 | IC50 CatBoost w=0.35 + SI α=0.45 |
+| combo_w35_a42 | −1.53 | 3/3 | запасной combo |
+| **ic50_cat_w35** | **−1.23** | 3/3 | только IC50, проще |
+| si_a45 | −0.41 | 3/3 | только SI α=0.45 |
+| ic50_trans_w* | −0.02…−0.09 | 1/3 | нестабильно |
+| ic50_size_cols | +0.46 | 0/3 | хуже ext |
+
+**SI robust w** (0.15–0.25) и **α<0.40** — слабее ref; лучший SI-сдвиг **α=0.45** (больше direct SI, меньше ratio).
+
+**Рекомендация сабмита** (1 попытка): ~~`submission_phase_b_combo_w35_a45.csv`~~  
+Консервативно: ~~`submission_phase_b_ic50_w35.csv`~~
+
+### Public (фаза B, май 2026)
+
+| Файл | Public | Δ vs 280.76 | Δ vs prev best |
+|------|--------|-------------|----------------|
+| **`submission_phase_e_fr42_ic65.csv`** | **274.76167** | **best** |
+| `submission_phase_e_fr_ic50_w42.csv` | 274.80622 | +0.04 |
+| `submission_phase_e_fr42_ic65_cc28.csv` | 274.89742 | +0.14 — cc28 **хуже**, закрыть |
+| `submission_phase_e_fr_ic50_w35.csv` | 275.30064 | prev |
+| `submission_phase_b_ic50_w50.csv` | ? | OOF −0.86, не сабмитили |
+
+**Вывод:** w55_cc25 подтверждён. OOF −1.61 → public −0.11 (CC50 cat снова занижен OOF). **База = w55_cc25.**
+
+**Выводы (актуально):**
+- IC50 w + CC50 cat — рабочий трек, но **~−0.1 public/сабмит**, потолок ≈ 278–279.
+- SI α>0.35 — закрыть.
+- **Новая база:** `w55_cc25` (IC50 cat 55%, CC50 cat 25%, k3/trans60).
+
+### Тюнинг ic50_cat_w (локально, public ref 280.13)
+
+Скрипт: `run_ic50_w_grid.py`. Ref = w0.35, CC50/SI frozen.
+
+| w | s42 | s2024 | s7 | mean Δ vs w35 | wins |
+|---|-----|-------|-----|-----------------|------|
+| 0.30 | 527.26 | 534.64 | 535.56 | +0.59 | 0/3 |
+| 0.32 | 527.12 | 534.37 | 535.24 | +0.35 | 0/3 |
+| 0.33 | 527.05 | 534.24 | 535.09 | +0.23 | 0/3 |
+| **0.35** | 526.93 | 533.98 | 534.79 | 0 (public **280.13**) | — |
+| **0.37** | 526.81 | 533.74 | 534.50 | **−0.22** | 3/3 |
+| **0.38** | 526.75 | 533.62 | 534.36 | **−0.32** | 3/3 |
+| **0.40** | 526.65 | 533.39 | 534.08 | **−0.53** | 3/3 |
+
+OOF монотонно улучшается w35→w40 (как раньше IC50 size). Public на w35 подтвердил тренд.
+
+**Следующие сабмиты (фаза C, OOF vs w40):**
+
+| Кандидат | mean Δ OOF | wins | Public |
+|----------|------------|------|--------|
+| ic50_w40 | 0 | — | **279.91622** |
+| **w55_cc25** | **−1.61** | 3/3 | **279.80541** (−0.11) |
+| ic50_w50 | −0.86 | 3/3 | ? |
+| ic50_w55 | −1.20 | 3/3 | ? |
+
+- **Новая база:** `w55_cc25` — IC50 CatBoost ext **55%**, CC50 k3/trans60/**cat25%**, SI α=0.35.
+
+```bash
+python make_submission_phase_b.py w55_cc25
+```
+
+**OOF −1.61 → public −0.11** — снова сильное занижение эффекта CC50 cat, но направление верное.
+
+**До LB 264–270 (~10–15 public):** текущий трек IC50/CC50 весов ≈ **−0.1 public/сабмит** → нужен **SI-прорыв**, не ещё w60/w65.
+
+### Фаза D — SI CatBoost top-k (public ref w55_cc25 279.81)
+
+Скрипты: `run_phase_d_si_catboost.py`, `run_phase_d2_si_replace.py`.
+
+| Подход | mean Δ OOF | wins | SI RMSE |
+|--------|------------|------|---------|
+| blend SI CatBoost **поверх** robust | +0.03…+0.09 | 0/3 | ~787 |
+| **replace robust:** 65% cl_SI + 35% CatBoost top-90 | **−0.26** | 3/3 | 787 |
+| replace robust w45_k120 | −0.19 | 3/3 | 787 |
+| w≥0.70 / MAE | +0.02…+0.30 | 0/3 | 788+ |
+
+**Вывод:** SI CatBoost top-k **не blend**, а **замена** robust HGB. OOF −0.26 → public **+0.43** (хуже w55_cc25). **Ветка закрыта.**
+
+~~Опциональный сабмит: `submission_phase_b_si_cb_w35_k90.csv`~~
+
+### Фаза E — Morgan / Mordred proxy (public ref w55_cc25 279.81)
+
+**SMILES в CSV нет** — настоящие Morgan/Mordred недоступны. Прокси-блоки:
+- **Morgan** = `fr_*` (70) + `FpDensityMorgan*` (73 cols)
+- **Mordred** = BCUT/Chi/Kappa/VSA/charge/topo (98 cols)
+
+Скрипты: `run_phase_e_structural.py`, `make_submission_phase_e.py`.
+
+| Head | mean Δ OOF | wins | Public |
+|------|------------|------|--------|
+### Дотюнинг fr_ic50_w35 (public 275.30)
+
+Скрипты: `run_tune_fr_best.py`, `run_tune_fr_top.py`.
+
+Ref = fr_w35 + w55_cc25. Все Δ vs ref.
+
+| Кандидат | mean Δ OOF | wins | Комментарий |
+|----------|------------|------|-------------|
+| fr_w42 | −0.05 | 2/3 | малый шаг fr 35→42 |
+| fr_w40 | −0.05 | 2/3 | |
+| **fr42_ic65** | **−0.32** | 2/3 | ext IC50 55→65 |
+| fr42_ic65_cc28 | −0.37 | 2/3 | + cc50 cat 28% |
+| fr42_ic65_cc30 | −0.38 | 2/3 | seed42 +0.2 |
+
+**SI/combo не трогать** (combo public 276.44).
+
+**Public дотюнинг (май 2026):**
+
+| Файл | Public | Δ vs fr35 |
+|------|--------|-----------|
+| **fr42_ic65** | **274.76167** | **−0.54** |
+| fr42 only | 274.80622 | −0.49 |
+| fr42_ic65_cc28 | 274.89742 | −0.40 (cc28 хуже ic65 alone) |
+
+**Формула best:**
+```text
+w55_cc25 base, но ic50_ext_cat_w=0.65 (было 0.55)
++ fr_* CatBoost IC50 blend w=0.42 (было 0.35)
+CC50 cat=0.25, SI не трогать
+```
+
+**Закрыто:** cc50 cat 28% поверх ic65, combo SI, fr35 без ic65.
+
+**Следующий локальный тюнинг (если сабмиты есть):** ic50 ∈ {0.62, 0.68, 0.70}, fr ∈ {0.40, 0.45} при cc50=0.25 фикс.
+
+### Почему LB 264–270 — другой порядок задачи
+
+Ref w40 OOF per-target (seed 42): **IC50≈327, CC50≈466, SI≈788**, mean≈527.
+
+- **SI ≈ 50% mean RMSE** — главный потолок. Пока SI OOF ~788, mean OOF не опустится к ~500 (грубая цель public ~265) без **прорыва по SI**, а не ещё +0.5% веса CatBoost.
+- Тюнинг IC50 w40→w65 даёт OOF −1.7 (~public −0.3…−0.7 по истории). CC50 cat 25% + w55 ещё −0.4 OOF. Потолок этого трека ≈ **278–279 public**.
+- Full CatBoost/LGBM blend — OOF **+10…+13** (хуже). Stack_ridge — провал.
+
+**Ветки для прыжка к 264–270:**
+1. ~~Morgan/Mordred~~ — **прокси без SMILES** (фаза E): IC50 −1.84 OOF, combo −2.65. Public TBD.
+2. Настоящие Morgan 2048-bit — нужен SMILES (нет в датасете).
+3. SI-proxy mordred w35 — −0.81 OOF, слабее IC50.
+
+**Закрыто:** SI α>0.35, full-model blend, CC50 k>4, SI CatBoost top-k (+0.43 public).
 
 ## Фаза A — сетка IC50/CC50 (локально, май 2026)
 
