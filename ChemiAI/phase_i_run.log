@@ -1,0 +1,41 @@
+/Users/dmitriytonkusin/Mephi/Машинное обучение без учителя/mephi-unsupervised-learning/ChemiAI/.venv/lib/python3.13/site-packages/joblib/externals/loky/backend/context.py:131: UserWarning: Could not find the number of physical cores for the following reason:
+invalid literal for int() with base 10: ''
+Returning the number of logical cores instead. You can silence this warning by setting LOKY_MAX_CPU_COUNT to the number of cores you want to use.
+  warnings.warn(
+  File "/Users/dmitriytonkusin/Mephi/Машинное обучение без учителя/mephi-unsupervised-learning/ChemiAI/.venv/lib/python3.13/site-packages/joblib/externals/loky/backend/context.py", line 249, in _count_physical_cores
+    cpu_count_physical = _count_physical_cores_darwin()
+  File "/Users/dmitriytonkusin/Mephi/Машинное обучение без учителя/mephi-unsupervised-learning/ChemiAI/.venv/lib/python3.13/site-packages/joblib/externals/loky/backend/context.py", line 318, in _count_physical_cores_darwin
+    return int(cpu_info)
+Phase I vs Phase H (public 272.44). VSA cols: 55
+REF phase_h @ 42: OOF=523.64 (IC50=318.7 CC50=464.4 SI=787.8)
+REF phase_h @ 2024: OOF=527.55 (IC50=328.7 CC50=467.1 SI=786.8)
+REF phase_h @ 7: OOF=528.14 (IC50=323.8 CC50=473.7 SI=787.0)
+  full_cb15... s42=523.46(-0.18) s2024=527.56(+0.01) s7=528.16(+0.02) 
+  full_cb20... s42=523.42(-0.23) s2024=527.58(+0.03) s7=528.18(+0.05) 
+  full_cb25... s42=523.38(-0.26) s2024=527.61(+0.06) s7=528.22(+0.08) 
+  pic50_ext... s42=522.56(-1.08) s2024=525.94(-1.61) s7=527.00(-1.14) 
+  ext_multiseed... s42=523.62(-0.02) s2024=527.57(+0.02) s7=528.16(+0.02) 
+  pic50_fr... s42=524.05(+0.41) s2024=527.30(-0.25) s7=528.26(+0.12) 
+  vsa_w15... s42=523.69(+0.05) s2024=527.76(+0.21) s7=527.98(-0.16) 
+  vsa_w20... s42=523.73(+0.09) s2024=527.86(+0.31) s7=527.96(-0.18) 
+  pic50_ext_full20... s42=522.09(-1.55) s2024=525.78(-1.77) s7=526.80(-1.34) 
+  full25_pic50... s42=524.46(+0.82) s2024=527.47(-0.08) s7=528.50(+0.36) 
+
+=== Phase I (1599s) ===
+            name  oof_mean  delta_mean  min_delta  wins    ic50      si
+pic50_ext_full20   +524.89       -1.55      -1.77     3 +324.46 +781.82
+       pic50_ext   +525.17       -1.27      -1.61     3 +325.30 +781.82
+       full_cb15   +526.39       -0.05      -0.18     1 +323.58 +787.21
+       full_cb20   +526.39       -0.05      -0.23     1 +323.58 +787.21
+       full_cb25   +526.40       -0.04      -0.26     1 +323.61 +787.21
+   ext_multiseed   +526.45       +0.01      -0.02     0 +323.74 +787.22
+         vsa_w15   +526.48       +0.03      -0.16     1 +323.83 +787.21
+         vsa_w20   +526.52       +0.07      -0.18     1 +323.95 +787.21
+        pic50_fr   +526.54       +0.09      -0.25     1 +324.01 +787.21
+    full25_pic50   +526.81       +0.37      -0.08     1 +324.83 +787.21
+
+★ Кандидаты для сабмита:
+  pic50_ext_full20: mean Δ=-1.55, wins=3
+  pic50_ext: mean Δ=-1.27, wins=3
+
+  .venv/bin/python make_submission_phase_i.py <variant>

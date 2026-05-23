@@ -1,4 +1,4 @@
-"""Генератор solution_best.ipynb — public best 272.44 (morgan_w25)."""
+"""Генератор solution_best.ipynb — public best 272.17 (full_cb25)."""
 import json
 from pathlib import Path
 
@@ -21,10 +21,10 @@ def code(source: str) -> dict:
 
 cells = [
     md(
-        """# ChemiAI — лучший public пайплайн (272.44)
+        """# ChemiAI — лучший public пайплайн (272.17)
 
 > Регрессия по RDKit-дескрипторам: IC50, CC50, SI.
-> Финальная формула: base + fr-head + mordred-head + morgan-head для IC50.
+> Финальная формула: Phase H (4 IC50-головы) + CatBoost(all 192) w=0.25.
 
 **Автор:** команда ChemiAI
 
@@ -36,8 +36,8 @@ cells = [
 
 **Аннотация:**
 Воспроизводимый ноутбук собирает сабмит из `data/train.csv` и `data/test.csv`.
-Лучший public score: **272.44** (`submission_phase_h_morgan_w25.csv`).
-Ключевые компоненты: KMeans+HGB baseline, transductive CC50 (k=3), extended IC50 CatBoost (w=0.65), fr-head (w=0.42), mordred-head (w=0.55), morgan-head (w=0.25), SI-инвариант (α=0.35).
+Лучший public score: **272.17** (`submission_phase_i_full_cb25.csv`).
+Ключевые компоненты: Phase H (ic65 + fr42 + mord55 + morgan25) + **full CatBoost IC50 w=0.25**, transductive CC50 (k=3), SI-инвариант (α=0.35).
 
 ---
 
@@ -66,7 +66,7 @@ cells = [
 
 Гипотеза исследования: для малого табличного датасета (n=751) выигрывают простые target-wise бленды специализированных голов, а не глубокий стеккинг.
 
-Путь к best: clustering → transductive CC50 → SI robust → IC50 CatBoost → fr-head → mordred-head → **morgan-head IC50**.
+Путь к best: clustering → transductive CC50 → SI robust → IC50 CatBoost → fr → mordred → morgan → **full CatBoost IC50 blend**.
 
 SMILES в CSV нет — Morgan/Mordred реализованы через proxy-блоки RDKit-признаков.
 
@@ -113,6 +113,7 @@ from run_local_signal_search import (
 )
 from run_phase_b_si_ic50 import frozen_cc50
 from run_phase_e_structural import blend_extra_head, feature_blocks
+from run_phase_i_kaggle_ideas import blend_ic50_full
 
 RANDOM_STATE = 42
 N_SPLITS = 5
@@ -129,8 +130,9 @@ SI_ALPHA = 0.35
 FR_IC50_W = 0.42
 MORDRED_IC50_W = 0.55
 MORGAN_IC50_W = 0.25
+FULL_IC50_W = 0.25
 SI_RATIO_EPS = 1e-3
-PUBLIC_BEST_SCORE = 272.44
+PUBLIC_BEST_SCORE = 272.17
 
 SIZE_FEATURE_NAMES = [
     "LabuteASA", "MolMR", "Chi0", "MolWt", "ExactMolWt",
@@ -144,7 +146,7 @@ TARGET_COLS = ["IC50, mM", "CC50, mM", "SI"]
 SUBMISSION_COLS = ["IC50", "CC50", "SI"]
 ID_COL = "index"
 DATA_DIR = Path("data")
-OUTPUT_SUBMISSION_PATH = Path("submission_phase_h_morgan_w25.csv")
+OUTPUT_SUBMISSION_PATH = Path("submission_phase_i_full_cb25.csv")
 
 %matplotlib inline
 sns.set_theme(style="whitegrid")
@@ -238,6 +240,8 @@ plt.show()
 **Phase G mordred-head** — CatBoost на Mordred-proxy дескрипторах для IC50 (w=0.55).
 
 **Phase H morgan-head** — CatBoost на Morgan-proxy (`fr_*` + `FpDensityMorgan*`) для IC50 (w=0.25).
+
+**Phase I full-head** — CatBoost на всех 192 признаках только для IC50 (w=0.25).
 """
     ),
     md(
@@ -313,7 +317,17 @@ plt.show()
 
 **Статус:** 🚫 Закрыто — best **morgan w=0.25**.
 
-#### Эксперимент #8: Seed ensemble (Phase H)
+#### Эксперимент #8: pIC50 для ext CatBoost (Phase I)
+
+**Гипотеза:** QSAR-трансформация pIC50 улучшит ext CatBoost (OOF −1.55, 3/3 seeds).
+
+**Результат:** public **275.43** (`pic50_ext_full20`) vs best **272.17**.
+
+**Почему не сработало:** сдвинул IC50 вниз на test → SI через ratio разъехался; OOF снова обманул.
+
+**Статус:** 🚫 Закрыто.
+
+#### Эксперимент #9: Seed ensemble (Phase H)
 
 **Гипотеза:** усреднение test-предсказаний по 10 seed стабилизирует score.
 
@@ -323,7 +337,7 @@ plt.show()
 
 **Статус:** 🚫 Закрыто.
 
-#### Эксперимент #9: fr_w45 / ic68 / ic70 при fixed mord55
+#### Эксперимент #10: fr_w45 / ic68 / ic70 при fixed mord55
 
 **Гипотеза:** дотюнинг fr и ic65 после mordred-head.
 
@@ -338,18 +352,13 @@ plt.show()
 На основе экспериментов зафиксированы три принципа:
 
 1. **Простота > сложность** — фиксированные веса бленда, без метамодели.
-2. **IC50 — стек специализированных CatBoost-голов** (ext → fr → mordred → morgan).
-3. **SI не трогаем** — α=0.35, robust HGB; SI-blends на public ломают score.
+2. **IC50 — стек специализированных CatBoost-голов** (ext → fr → mordred → morgan → full).
+3. **SI не трогаем** — α=0.35, robust HGB; SI-blends и pIC50 на public ломают score.
 
 ```text
-Base (5-fold CV):
-  IC50  = 0.35*cluster + 0.65*CatBoost(ext)
-  CC50  = 0.75*(0.40*cluster + 0.60*KNN_k3) + 0.25*CatBoost(full)
-  SI    = enforce(0.35*direct + 0.65*CC50/IC50)
-
-Phase E:  IC50 = (1-0.42)*base + 0.42*CatBoost(fr_*)
-Phase G:  IC50 = (1-0.55)*prev + 0.55*CatBoost(mordred_proxy)
-Phase H:  IC50 = (1-0.25)*prev + 0.25*CatBoost(morgan_proxy)
+Phase H IC50 = morgan25( mord55( fr42( ic65_base ) ) )
+Phase I:     IC50 = 0.75*phase_h_ic50 + 0.25*CatBoost(all 192 features)
+CC50/SI — без изменений (transductive k=3 + SI α=0.35)
 ```
 
 Далее — вспомогательные функции (одна функция на ячейку).
@@ -656,9 +665,9 @@ Target-wise blend: clustering HGB, transductive KNN для CC50, CatBoost для
     md(
         """## 5. Обучение и формирование submission
 
-Последовательно: base → fr-head → mordred-head → **morgan-head** (seed=42).
+Последовательно: base → fr → mordred → morgan → **full CatBoost IC50** (seed=42).
 
-Для побитового совпадения с leaderboard используем те же функции, что и в `run_local_signal_search.py` / `run_phase_e_structural.py`.
+Для побитового совпадения с leaderboard используем те же функции, что и в `run_local_signal_search.py` / `make_submission_phase_i.py`.
 
 Полный прогон занимает несколько минут на CPU.
 """
@@ -678,9 +687,13 @@ oof_mord, test_mord = blend_extra_head(
     X_train, X_test, y_train, oof_fr, test_fr,
     blocks["mordred"], 0, MORDRED_IC50_W, RANDOM_STATE,
 )
-oof_final, test_final = blend_extra_head(
+oof_morgan, test_morgan = blend_extra_head(
     X_train, X_test, y_train, oof_mord, test_mord,
     blocks["morgan"], 0, MORGAN_IC50_W, RANDOM_STATE,
+)
+oof_final, test_final = blend_ic50_full(
+    X_train, X_test, y_train, oof_morgan, test_morgan,
+    FULL_IC50_W, RANDOM_STATE,
 )
 
 oof_score = competition_score(y_train, oof_final)
@@ -697,7 +710,7 @@ print(
 """
     ),
     code(
-        """ref_path = Path("submission_phase_h_morgan_w25.csv")
+        """ref_path = Path("submission_phase_i_full_cb25.csv")
 reference_submission = pd.read_csv(ref_path) if ref_path.exists() else None
 
 submission = sample_submission.copy()
@@ -720,7 +733,7 @@ if reference_submission is not None:
         - reference_submission[SUBMISSION_COLS].values
     )
     print(f"\\nСверка с эталоном LB: max|diff|={diff.max():.6f}")
-    assert diff.max() < 1e-4, "расхождение с эталонным сабмитом 272.44"
+    assert diff.max() < 1e-4, "расхождение с эталонным сабмитом 272.17"
 """
     ),
     md(
@@ -728,7 +741,7 @@ if reference_submission is not None:
 
 Ключевые вехи public leaderboard (источник: train OOF / Kaggle public).
 
-Лучший результат — **272.44** (fr42 + ic65 + mord55 + morgan25).
+Лучший результат — **272.17** (Phase H + full CatBoost IC50 w=0.25).
 
 На графике OOF видно, что SI доминирует mean RMSE (~787 vs ~324 IC50).
 """
@@ -740,7 +753,8 @@ if reference_submission is not None:
     "IC50 size CatBoost": 284.61,
     "Phase E fr42_ic65": 274.76,
     "Phase G mordred_w55": 272.99,
-    "Phase H morgan_w25": PUBLIC_BEST_SCORE,
+    "Phase H morgan_w25": 272.44,
+    "Phase I full_cb25": PUBLIC_BEST_SCORE,
 }
 labels = list(milestones.keys())
 scores = list(milestones.values())
@@ -782,15 +796,13 @@ SI-ветки (Phase F transductive, CatBoost SI) на public ухудшали s
 Ноутбук воспроизводит лучший public пайплайн без готовых prediction CSV.
 
 ```text
-IC50 = morgan25( mord55( fr42( ic65_base ) ) )
-fr42    = 0.58*base + 0.42*CatBoost(fr_*)
-mord55  = 0.45*fr42 + 0.55*CatBoost(mordred_proxy)
-morgan25 = 0.75*prev + 0.25*CatBoost(morgan_proxy)
+phase_h = morgan25( mord55( fr42( ic65_base ) ) )
+IC50    = 0.75*phase_h + 0.25*CatBoost(all 192)
 ```
 
-Public best: **272.44**.
+Public best: **272.17**.
 
-Прогресс: clustering ~306 → **272.44** (−33.8 public).
+Прогресс: clustering ~306 → **272.17** (−34.1 public).
 
 ## 8. Воспроизведение
 
@@ -799,7 +811,7 @@ Public best: **272.44**.
 1. `pip install -r requirements.txt`
 2. Положите CSV в `data/`
 3. **Kernel → Restart & Run All**
-4. Результат: `submission_phase_h_morgan_w25.csv`
+4. Результат: `submission_phase_i_full_cb25.csv`
 
 Зависимости зафиксированы в `requirements.txt` (numpy, pandas, scikit-learn, catboost, matplotlib, seaborn).
 """

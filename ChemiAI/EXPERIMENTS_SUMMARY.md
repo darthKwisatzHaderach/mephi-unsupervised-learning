@@ -2,21 +2,33 @@
 
 ## TL;DR для команды
 
-Текущий лучший публичный score: **274.76167**.
+Текущий лучший публичный score: **272.17487**.
 
-Лучший файл: `submission_phase_e_fr42_ic65.csv`.
+Лучший файл: `submission_phase_i_full_cb25.csv` (Phase H + **CatBoost(all 192) IC50 w=0.25**).
 
-Предыдущий best: **275.30064** (`submission_phase_e_fr_ic50_w35.csv`).
+Предыдущий best: **272.44** (`submission_phase_h_morgan_w25.csv`, Phase H).
 
-Предыдущий best: **280.13129** (`submission_phase_b_ic50_w35.csv`).
+Предыдущий best: **272.99** (`submission_phase_g_mordred_w55.csv`).
 
-Формула лучшего сабмита:
+**Phase I public (закрытые ветки):**
+- `full_cb25` → **272.17** ✓ текущий best
+- `pic50_ext_full20` → **275.43** (+3.26 vs best) — OOF −1.55 обманул, ветка закрыта
+- `pic50_ext` — не сабмитить (та же pIC50-логика)
+
+**Phase I (ещё не пробовали на LB):**
+
+| Файл | OOF Δ (3 seeds) | public |
+|------|-----------------|--------|
+| `submission_phase_i_full_cb25.csv` | −0.04 | **272.17** ✓ |
+| ~~`submission_phase_i_pic50_ext_full20.csv`~~ | −1.55 | **275.43** ✗ |
+| ~~`submission_phase_i_pic50_ext.csv`~~ | −1.27 | — |
+
+Формула текущего best (Phase I = Phase H + full CB IC50):
 
 ```text
-IC50 = 75% clustering (KMeans k=4 + HGB) + 25% CatBoost(size descriptors)
-CC50 = 40% clustering + 60% transductive PCA20 KNN5
-SI_direct = 70% clustering + 30% SI-модель (HGB loss=absolute_error)
-SI_final  = 0.35 * SI_direct + 0.65 * (CC50 / IC50)   # eps=1e-3
+Phase H IC50 = morgan25( mord55( fr42( ic65_base ) ) )
+Phase I:     IC50 = 0.75*phase_h_ic50 + 0.25*CatBoost(all 192 features, IC50 only)
+CC50/SI — без изменений (transductive k=3 + SI α=0.35)
 ```
 
 Предыдущие вехи:
@@ -24,7 +36,7 @@ SI_final  = 0.35 * SI_direct + 0.65 * (CC50 / IC50)   # eps=1e-3
 - `submission_exp3_si_absolute_robust.csv` → **293.09177**
 - `submission_transductive_neighbor_target_blend.csv` → **298.48843**
 
-Главный вывод: второй крупный скачок дал **CatBoost на size-дескрипторах для IC50** (−7.45 public при −1…−3 OOF). Ранее SI robust head (−6.4) при неизменном IC50.
+Главный вывод: **seed ensemble CatBoost (ext+fr, 4 seeds)** дал −0.41 public при OOF −0.07 (Phase F). Ранее CatBoost size IC50 (−7.45 public) и fr-head Phase E (−0.54).
 
 Что не отправлять:
 
@@ -37,6 +49,13 @@ SI_final  = 0.35 * SI_direct + 0.65 * (CC50 / IC50)   # eps=1e-3
 - `submission_exp5_multitask_mlp_ratio_si.csv` — `360.14158`, жёсткий `SI=CC50/IC50` + MLP, ветка закрыта.
 - `submission_e34_ic50cc4_si3.csv` — `293.71572`, exp4 IC50/CC50 + exp3 SI хуже чистого exp3.
 - Все `submission_clustering_public_k64_blend_10/15/20.csv` — `k64`-направление ухудшило public уже на `5%`.
+- `submission_phase_f_fp20_best.csv` — public **278.34076**, FpDensity (3 cols) хуже best на **+3.58**.
+- `submission_phase_f_si_residual_w25.csv` — public **275.22304**, SI log-residual хуже на **+0.46**.
+- `submission_phase_f_ic68_fr40.csv` — public **274.80681**, ic68+fr40 хуже seed_ensemble на **+0.45**.
+- `submission_phase_f_isotonic_best.csv` — public **336.19937**, ветка закрыта (OOF −2.5 → public **+61.8** vs best, хуже stack_ridge).
+- `submission_minimal_cb_multitarget_raw.csv` — public **359.57540**, ветка закрыта (OOF −11.7 → public **+85.2** vs best).
+- `submission_phase_i_pic50_ext_full20.csv` — public **275.42842**, pIC50 ext+full20: OOF −1.55 → public **+3.26** vs best, ветка закрыта.
+- `submission_phase_i_pic50_ext.csv` — не сабмитить (та же pIC50-логика).
 
 ## Данные и метрика
 
@@ -68,8 +87,14 @@ SI = CC50 / IC50
 - `303.87592` — дальнейшее усиление neighbor.
 - `302.93165` — `CC50=24%`, `SI=12%` neighbor.
 - `300.82888` — target-вариант raw neighbor.
-- **`274.76167` — `submission_phase_e_fr42_ic65.csv`, текущий best.**
+- **`274.35568` — `submission_phase_f_seed_ensemble.csv`, текущий best.**
+- `274.76167` — `submission_phase_e_fr42_ic65.csv`.
+- `274.80681` — `submission_phase_f_ic68_fr40.csv`.
 - `274.80622` — `submission_phase_e_fr_ic50_w42.csv`.
+- `275.22304` — `submission_phase_f_si_residual_w25.csv`.
+- `278.34076` — `submission_phase_f_fp20_best.csv`.
+- `336.19937` — `submission_phase_f_isotonic_best.csv`.
+- `359.57540` — `submission_minimal_cb_multitarget_raw.csv` (катастрофа).
 - `275.30064` — `submission_phase_e_fr_ic50_w35.csv`.
 - **`279.91622` — `submission_phase_b_ic50_w40.csv`.**
 - `280.13129` — `submission_phase_b_ic50_w35.csv`.
@@ -678,7 +703,57 @@ CC50 cat=0.25, SI не трогать
 
 **Закрыто:** cc50 cat 28% поверх ic65, combo SI, fr35 без ic65.
 
-**Следующий локальный тюнинг (если сабмиты есть):** ic50 ∈ {0.62, 0.68, 0.70}, fr ∈ {0.40, 0.45} при cc50=0.25 фикс.
+**Следующий локальный тюнинг (если сабмиты есть):** ~~ic50 ∈ {0.62, 0.68, 0.70}, fr ∈ {0.40, 0.45}~~ — ic68_fr40 public **274.80681** (хуже fr42_ic65).
+
+### Фаза F — seed ensemble / SI residual / FpDensity / isotonic (май 2026)
+
+Скрипты: `pipeline_core.py`, `run_phase_f_signal_search.py`, `make_submission_phase_f.py`.
+
+База = Phase E fr42_ic65. Локальный поиск (seed=42 OOF vs baseline 525.04):
+
+| Кандидат | OOF Δ | Public | Δ vs 274.76 |
+|----------|-------|--------|-------------|
+| **seed_ensemble ext+fr** | **−0.07** | **274.35568** | **−0.41** |
+| ic68_fr40 | −0.04 | 274.80681 | +0.05 |
+| isotonic nested CV | −2.48 | **336.19937** | **+61.44** |
+| fp_ic50_w20 | +0.37 | 278.34076 | +3.58 |
+| si_residual_w25 | +1.21 | 275.22304 | +0.46 |
+| fr_cc50_w20/w30 | +0.84/+2.44 | — | закрыть |
+
+**Выводы:**
+- **Seed ensemble подтверждён public** — OOF −0.07 → public −0.41.
+- **Isotonic — закрыть окончательно.** Nested OOF −2.5…−8.9, но test SI mean 10→92; public **336.20** (+61.8). Тот же класс ошибки, что stack_ridge: калибровка под train-OOF не переносится на test.
+- **Не сабмитить:** `isotonic_seed_ensemble` (test SI 10→35, тот же shift).
+- **ic68_fr40** ≈ fr42 only — **закрыть**.
+- **SI log-residual** и **FpDensity IC50** — **закрыть**.
+
+**Новая база:** `submission_phase_f_seed_ensemble.csv` (**274.35568**).
+
+```bash
+python make_submission_phase_f.py seed_ensemble   # текущий best
+python run_phase_f_signal_search.py --quick
+```
+
+**Следующий сабмит (если есть попытка):** только микро-тюнинг поверх seed_ensemble (fr45, ic62). Isotonic/si_residual/fp20/minimal CB **не трогать**.
+
+### Minimal CatBoost — full 192 feat, raw y (май 2026)
+
+Скрипты: `run_minimal_catboost_baseline.py`, `make_submission_minimal_cb.py`.
+
+Гипотеза: RDKit-дескрипторы достаточны без clustering/transductive/SI-invariant.
+
+| Кандидат | mean Δ OOF (3 seed) | Public | Δ vs 274.36 |
+|----------|---------------------|--------|-------------|
+| cb_multitarget_raw | **−11.71** (3/3) | **359.57540** | **+85.22** |
+| cb_raw_ms | −9.40 (3/3) | — | не сабмитили |
+| blend_ic50_cb25 | −0.74 (3/3) | — | консервативный запасной |
+| cb_log1p_na | +12.27 (0/3) | — | закрыть |
+
+Test shift vs seed_ensemble: SI mean **10.8 → 82**, CC50 **545 → 651** — тот же класс ошибки, что isotonic.
+
+**Вывод:** OOF −11 **не переносится** на public. Полная замена пайплайна «minimal touch» **закрыта**. Multi-head (clustering + transductive + invariant + seed ensemble) **обязателен**.
+
+**Best без изменений:** `submission_phase_f_seed_ensemble.csv` → **274.35568**.
 
 ### Почему LB 264–270 — другой порядок задачи
 
@@ -714,14 +789,20 @@ Ref w40 OOF per-target (seed 42): **IC50≈327, CC50≈466, SI≈788**, mean≈5
 
 - `solution_v2.ipynb` — основной CatBoost/top-k путь, полезен как объяснимый baseline.
 - `solution_clustering.ipynb` — clustering/neighbor логика и объяснение, почему она лучше классического top-k.
-- `solution_best.ipynb` — предыдущий best (transductive blend, 298.49).
-- `solution_final.ipynb` — **текущий best** (IC50 CatBoost size + exp3 SI, 284.61).
+- `solution_best.ipynb` — best-пайплайн (274.76 → 274.36 после seed ensemble).
+- `solution_final.ipynb` — IC50 CatBoost size + exp3 SI (284.61).
+- `pipeline_core.py` — общий код best + Phase F расширения.
+- `run_phase_f_signal_search.py` — локальный поиск Phase F.
+- `make_submission_minimal_cb.py` — minimal CatBoost сабмиты (ветка закрыта).
+- `run_minimal_catboost_baseline.py` — OOF minimal vs seed_ensemble.
 - `solution_local_lab.ipynb` — локальная лаборатория для OOF-сравнений, target-wise blend grid и проверки стабильности гипотез без лишних сабмитов.
 - `run_preprocessing_ablation.py` — сравнение предобработки solution.ipynb vs final.
 - `run_phase_a_ic50_cc50_grid.py` — Фаза A: сетка IC50/CC50 при замороженном SI.
 - `make_submission_phase_a_ic50_trans20.py` — опциональный сабмит IC50 20% transductive.
 - `EXPERIMENTS_SUMMARY.md` — этот отчет.
-- `submission_ic50_size_catboost_w25.csv` — **текущий лучший сабмит**.
+- `submission_phase_f_seed_ensemble.csv` — **текущий лучший сабмит** (274.35568).
+- `submission_phase_e_fr42_ic65.csv` — предыдущий best (274.76167).
+- `submission_ic50_size_catboost_w25.csv` — веха 284.61.
 - `submission_combo_exp3_inv_a35.csv` — предыдущий best (292.06).
 - `submission_exp3_si_absolute_robust.csv` — база SI-head.
 - `submission_transductive_neighbor_target_blend.csv` — предыдущий best.

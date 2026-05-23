@@ -232,6 +232,17 @@ def _transductive_fold(
     return tr_valid, tr_test
 
 
+def ic50_to_pic50(y_mm: np.ndarray) -> np.ndarray:
+    """IC50 (mM) → pIC50 = -log10(M)."""
+    molar = np.clip(y_mm * 1e-3, 1e-15, None)
+    return -np.log10(molar)
+
+
+def pic50_to_ic50_mm(p: np.ndarray) -> np.ndarray:
+    """pIC50 → IC50 (mM)."""
+    return np.power(10.0, -np.clip(p, -3, 15)) * 1e3
+
+
 def _ic50_catboost_fold(
     X_fit: pd.DataFrame,
     X_valid: pd.DataFrame,
@@ -240,9 +251,13 @@ def _ic50_catboost_fold(
     size_cols: list[str],
     random_state: int,
     fold_i: int,
+    *,
+    pic50: bool = False,
+    cat_seeds: list[int] | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     cols_key = tuple(size_cols)
-    key = ("ic50cb", random_state, fold_i, cols_key)
+    seeds = cat_seeds or [random_state]
+    key = ("ic50cb", random_state, fold_i, cols_key, pic50, tuple(seeds))
     cached = _FOLD_CACHE.get(key)
     if cached is not None:
         return cached  # type: ignore[return-value]
@@ -251,10 +266,22 @@ def _ic50_catboost_fold(
     Xf = imp.fit_transform(X_fit[size_cols])
     Xv = imp.transform(X_valid[size_cols])
     Xt = imp.transform(X_test[size_cols])
-    m = _catboost(random_seed=random_state)
-    m.fit(Xf, y_fit[:, 0], verbose=False)
-    valid = np.clip(m.predict(Xv), 0, None)
-    test = np.clip(m.predict(Xt), 0, None)
+    y_tr = ic50_to_pic50(y_fit[:, 0]) if pic50 else y_fit[:, 0]
+
+    preds_v, preds_t = [], []
+    for cb_seed in seeds:
+        m = _catboost(random_seed=cb_seed)
+        m.fit(Xf, y_tr, verbose=False)
+        pv = m.predict(Xv)
+        pt = m.predict(Xt)
+        if pic50:
+            pv = pic50_to_ic50_mm(pv)
+            pt = pic50_to_ic50_mm(pt)
+        preds_v.append(np.clip(pv, 0, None))
+        preds_t.append(np.clip(pt, 0, None))
+
+    valid = np.mean(preds_v, axis=0)
+    test = np.mean(preds_t, axis=0)
     _FOLD_CACHE[key] = (valid, test)
     return valid, test
 
@@ -370,6 +397,8 @@ class PipelineConfig:
     si_catboost_mae: bool = False
     n_clusters: int = 4
     cluster_blend_other_k: int | None = None
+    ic50_pic50: bool = False
+    ic50_cat_seeds: tuple[int, ...] | None = None
 
 
 def fit_oof(
@@ -405,6 +434,8 @@ def fit_oof(
         if cfg.ic50_cat_w > 0 and size_cols:
             ic50_cb_valid, ic50_cb_test = _ic50_catboost_fold(
                 X_fit, X_valid, X_test, y_fit, size_cols, random_state, fold_i,
+                pic50=cfg.ic50_pic50,
+                cat_seeds=list(cfg.ic50_cat_seeds) if cfg.ic50_cat_seeds else None,
             )
 
         cc50_cb_valid = cl_valid[:, 1]
