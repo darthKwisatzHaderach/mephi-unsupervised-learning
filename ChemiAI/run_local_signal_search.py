@@ -124,7 +124,8 @@ def make_transductive_pca_features(
     fit_imputed = imputer.fit_transform(fit_frame)
     scaler = StandardScaler()
     fit_scaled = scaler.fit_transform(fit_imputed)
-    pca = PCA(n_components=n_components, random_state=random_state)
+    n_comp = min(n_components, fit_scaled.shape[0], fit_scaled.shape[1])
+    pca = PCA(n_components=n_comp, random_state=random_state)
     pca.fit(fit_scaled)
 
     def transform(frame: pd.DataFrame) -> np.ndarray:
@@ -211,25 +212,66 @@ def _transductive_fold(
     trans_k: int,
     random_state: int,
     fold_i: int,
+    *,
+    pca_n: int = 20,
+    cc50_only: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
-    key = ("tr", random_state, fold_i, trans_k)
+    key = ("tr", random_state, fold_i, trans_k, pca_n, cc50_only)
     cached = _FOLD_CACHE.get(key)
     if cached is not None:
         return cached  # type: ignore[return-value]
 
     X_fit_pca, X_valid_pca, X_test_pca = make_transductive_pca_features(
-        X_fit, X_valid, X_test, random_state=random_state
+        X_fit, X_valid, X_test, n_components=pca_n, random_state=random_state,
     )
     knn = KNeighborsRegressor(
         n_neighbors=trans_k,
         weights="distance",
         n_jobs=N_JOBS,
     )
-    knn.fit(X_fit_pca, np.log1p(y_fit))
-    tr_valid = np.clip(np.expm1(knn.predict(X_valid_pca)), 0, None)
-    tr_test = np.clip(np.expm1(knn.predict(X_test_pca)), 0, None)
+    if cc50_only:
+        knn.fit(X_fit_pca, np.log1p(y_fit[:, 1]))
+        tr_valid = np.zeros((len(X_valid), 3))
+        tr_test = np.zeros((len(X_test), 3))
+        tr_valid[:, 1] = np.clip(np.expm1(knn.predict(X_valid_pca)), 0, None)
+        tr_test[:, 1] = np.clip(np.expm1(knn.predict(X_test_pca)), 0, None)
+    else:
+        knn.fit(X_fit_pca, np.log1p(y_fit))
+        tr_valid = np.clip(np.expm1(knn.predict(X_valid_pca)), 0, None)
+        tr_test = np.clip(np.expm1(knn.predict(X_test_pca)), 0, None)
     _FOLD_CACHE[key] = (tr_valid, tr_test)
     return tr_valid, tr_test
+
+
+def apply_si_meta_blend(
+    oof: np.ndarray,
+    test: np.ndarray,
+    y_train: np.ndarray,
+    *,
+    use_huber: bool = False,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Ridge/Huber: SI ~ f(SI_ml, CC50/IC50, CC50, IC50, log1p(CC50))."""
+
+    def _meta_x(ic50: np.ndarray, cc50: np.ndarray, si_ml: np.ndarray) -> np.ndarray:
+        ic50_safe = np.clip(ic50, 1e-3, None)
+        return np.column_stack([
+            si_ml,
+            cc50 / ic50_safe,
+            cc50,
+            ic50,
+            np.log1p(np.clip(cc50, 0, None)),
+        ])
+
+    from sklearn.linear_model import HuberRegressor, Ridge
+
+    x_oof = _meta_x(oof[:, 0], oof[:, 1], oof[:, 2])
+    model = HuberRegressor() if use_huber else Ridge(alpha=1.0)
+    model.fit(x_oof, y_train[:, 2])
+    out = oof.copy()
+    te = test.copy()
+    out[:, 2] = np.clip(model.predict(x_oof), 0, None)
+    te[:, 2] = np.clip(model.predict(_meta_x(test[:, 0], test[:, 1], test[:, 2])), 0, None)
+    return out, te
 
 
 def ic50_to_pic50(y_mm: np.ndarray) -> np.ndarray:
@@ -301,6 +343,41 @@ def _cc50_catboost_fold(
 
     m = _catboost(random_seed=random_state)
     m.fit(X_fit, np.log1p(y_fit[:, 1]), verbose=False)
+    valid = np.clip(np.expm1(np.clip(m.predict(X_valid), 0, 12)), 0, None)
+    test = np.clip(np.expm1(np.clip(m.predict(X_test), 0, 12)), 0, None)
+    _FOLD_CACHE[key] = (valid, test)
+    return valid, test
+
+
+def _cc50_lgb_fold(
+    X_fit: pd.DataFrame,
+    X_valid: pd.DataFrame,
+    X_test: pd.DataFrame,
+    y_fit: np.ndarray,
+    random_state: int,
+    fold_i: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    import lightgbm as lgb
+
+    key = ("cc50lgb", random_state, fold_i, X_fit.shape[1])
+    cached = _FOLD_CACHE.get(key)
+    if cached is not None:
+        return cached  # type: ignore[return-value]
+
+    m = lgb.LGBMRegressor(
+        n_estimators=500,
+        learning_rate=0.03,
+        max_depth=6,
+        num_leaves=31,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        reg_alpha=0.1,
+        reg_lambda=1.0,
+        random_state=random_state,
+        n_jobs=N_JOBS,
+        verbose=-1,
+    )
+    m.fit(X_fit, np.log1p(y_fit[:, 1]))
     valid = np.clip(np.expm1(np.clip(m.predict(X_valid), 0, 12)), 0, None)
     test = np.clip(np.expm1(np.clip(m.predict(X_test), 0, 12)), 0, None)
     _FOLD_CACHE[key] = (valid, test)
@@ -389,6 +466,7 @@ class PipelineConfig:
     ic50_trans_w: float = 0.0
     cc50_blend_w: float = 0.60
     cc50_trans_k: int = 5
+    cc50_pca_n: int = 20
     cc50_cat_w: float = 0.0
     si_robust_w: float = 0.30
     si_alpha: float = 0.35
@@ -399,6 +477,9 @@ class PipelineConfig:
     cluster_blend_other_k: int | None = None
     ic50_pic50: bool = False
     ic50_cat_seeds: tuple[int, ...] | None = None
+    cc50_cb_lgb: bool = False
+    cc50_trans_target_only: bool = False
+    si_meta_blend: bool = False
 
 
 def fit_oof(
@@ -407,6 +488,13 @@ def fit_oof(
     y_train: np.ndarray,
     cfg: PipelineConfig,
     random_state: int = RANDOM_STATE,
+    *,
+    X_transductive: pd.DataFrame | None = None,
+    X_test_transductive: pd.DataFrame | None = None,
+    X_clustering: pd.DataFrame | None = None,
+    X_test_clustering: pd.DataFrame | None = None,
+    X_cc50_cb: pd.DataFrame | None = None,
+    X_test_cc50_cb: pd.DataFrame | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Возвращает (oof, test_pred) shape (n_train, 3)."""
     n_train = len(X_train)
@@ -421,12 +509,36 @@ def fit_oof(
         X_valid = X_train.iloc[valid_idx]
         y_fit = y_train[train_idx]
 
+        if X_transductive is not None:
+            X_tr_fit = X_transductive.iloc[train_idx]
+            X_tr_valid = X_transductive.iloc[valid_idx]
+            X_tr_test = X_test_transductive if X_test_transductive is not None else X_test
+        else:
+            X_tr_fit, X_tr_valid, X_tr_test = X_fit, X_valid, X_test
+
+        if X_clustering is not None:
+            X_cl_fit = X_clustering.iloc[train_idx]
+            X_cl_valid = X_clustering.iloc[valid_idx]
+            X_cl_test = X_test_clustering if X_test_clustering is not None else X_test
+        else:
+            X_cl_fit, X_cl_valid, X_cl_test = X_fit, X_valid, X_test
+
+        if X_cc50_cb is not None:
+            X_cb_fit = X_cc50_cb.iloc[train_idx]
+            X_cb_valid = X_cc50_cb.iloc[valid_idx]
+            X_cb_test = X_test_cc50_cb if X_test_cc50_cb is not None else X_test
+        else:
+            X_cb_fit, X_cb_valid, X_cb_test = X_fit, X_valid, X_test
+
         cl_valid, cl_test = _clustering_fold(
-            X_fit, X_valid, X_test, y_fit,
+            X_cl_fit, X_cl_valid, X_cl_test, y_fit,
             cfg.n_clusters, cfg.cluster_blend_other_k, random_state, fold_i,
         )
         tr_valid, tr_test = _transductive_fold(
-            X_fit, X_valid, X_test, y_fit, cfg.cc50_trans_k, random_state, fold_i,
+            X_tr_fit, X_tr_valid, X_tr_test, y_fit,
+            cfg.cc50_trans_k, random_state, fold_i,
+            pca_n=cfg.cc50_pca_n,
+            cc50_only=cfg.cc50_trans_target_only,
         )
 
         ic50_cb_valid = cl_valid[:, 0]
@@ -441,8 +553,9 @@ def fit_oof(
         cc50_cb_valid = cl_valid[:, 1]
         cc50_cb_test = cl_test[:, 1]
         if cfg.cc50_cat_w > 0:
-            cc50_cb_valid, cc50_cb_test = _cc50_catboost_fold(
-                X_fit, X_valid, X_test, y_fit, random_state, fold_i,
+            cb_fold = _cc50_lgb_fold if cfg.cc50_cb_lgb else _cc50_catboost_fold
+            cc50_cb_valid, cc50_cb_test = cb_fold(
+                X_cb_fit, X_cb_valid, X_cb_test, y_fit, random_state, fold_i,
             )
 
         si_rob_valid = cl_valid[:, 2]
@@ -484,8 +597,9 @@ def fit_oof(
             fold_valid[:, 2] = (1 - w_cb) * fold_valid[:, 2] + w_cb * si_cb_v
             fold_test[:, 2] = (1 - w_cb) * fold_test[:, 2] + w_cb * si_cb_t
 
-        fold_valid = enforce_si_invariant(fold_valid, alpha=cfg.si_alpha)
-        fold_test = enforce_si_invariant(fold_test, alpha=cfg.si_alpha)
+        if not cfg.si_meta_blend:
+            fold_valid = enforce_si_invariant(fold_valid, alpha=cfg.si_alpha)
+            fold_test = enforce_si_invariant(fold_test, alpha=cfg.si_alpha)
 
         oof[valid_idx] = fold_valid
         test_pred += fold_test / N_SPLITS

@@ -75,16 +75,54 @@ def fit_phase_h(
     morgan_w: float = MORGAN_W,
     ic50_pic50: bool = False,
     ic50_cat_seeds: tuple[int, ...] | None = None,
+    X_trans: pd.DataFrame | None = None,
+    Xt_trans: pd.DataFrame | None = None,
+    cc50_trans_k: int | None = None,
+    cc50_blend_w: float | None = None,
+    cc50_cat_w: float | None = None,
+    cc50_pca_n: int | None = None,
+    si_alpha: float | None = None,
+    ic50_trans_w: float | None = None,
+    X_clust: pd.DataFrame | None = None,
+    Xt_clust: pd.DataFrame | None = None,
+    X_cc50_cb: pd.DataFrame | None = None,
+    Xt_cc50_cb: pd.DataFrame | None = None,
+    cc50_cb_lgb: bool = False,
+    cc50_trans_target_only: bool = False,
+    si_meta_blend: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Текущий best: base + fr + mordred + morgan."""
+    cc50_kw: dict = {}
+    if cc50_trans_k is not None:
+        cc50_kw["cc50_trans_k"] = cc50_trans_k
+    if cc50_blend_w is not None:
+        cc50_kw["cc50_blend_w"] = cc50_blend_w
+    if cc50_pca_n is not None:
+        cc50_kw["cc50_pca_n"] = cc50_pca_n
+    if si_alpha is not None and not si_meta_blend:
+        cc50_kw["si_alpha"] = si_alpha
+    if ic50_trans_w is not None:
+        cc50_kw["ic50_trans_w"] = ic50_trans_w
+    if cc50_cb_lgb:
+        cc50_kw["cc50_cb_lgb"] = True
+    if cc50_trans_target_only:
+        cc50_kw["cc50_trans_target_only"] = True
+    if si_meta_blend:
+        cc50_kw["si_meta_blend"] = True
     base = frozen_cc50(
         ext,
         ic50_cat_w=ic50_w,
-        cc50_cat_w=CC50_W,
+        cc50_cat_w=cc50_cat_w if cc50_cat_w is not None else CC50_W,
         ic50_pic50=ic50_pic50,
         ic50_cat_seeds=ic50_cat_seeds,
+        **cc50_kw,
     )
-    oof, test = fit_oof(X, Xt, y, base, random_state=seed)
+    oof, test = fit_oof(
+        X, Xt, y, base, random_state=seed,
+        X_transductive=X_trans, X_test_transductive=Xt_trans,
+        X_clustering=X_clust, X_test_clustering=Xt_clust,
+        X_cc50_cb=X_cc50_cb, X_test_cc50_cb=Xt_cc50_cb,
+    )
     oof, test = blend_extra_head(X, Xt, y, oof, test, blocks["fr_only"], 0, fr_w, seed)
     oof, test = blend_extra_head(X, Xt, y, oof, test, blocks["mordred"], 0, mord_w, seed)
     oof, test = blend_extra_head(X, Xt, y, oof, test, blocks["morgan"], 0, morgan_w, seed)

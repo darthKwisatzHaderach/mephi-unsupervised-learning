@@ -1,4 +1,4 @@
-"""Генератор solution_best.ipynb — public best 272.17 (full_cb25)."""
+"""Генератор solution_best.ipynb — public best 268.16 (si_a32)."""
 import json
 from pathlib import Path
 
@@ -21,23 +21,13 @@ def code(source: str) -> dict:
 
 cells = [
     md(
-        """# ChemiAI — лучший public пайплайн (272.17)
+        """# ChemiAI — лучший public пайплайн (268.16)
 
-> Регрессия по RDKit-дескрипторам: IC50, CC50, SI.
-> Финальная формула: Phase H (4 IC50-головы) + CatBoost(all 192) w=0.25.
-
-**Автор:** команда ChemiAI
-
-**Дата:** май 2026
-
-**Контакты:** mephi-unsupervised-learning / ChemiAI
-
-**Курс / проект:** ChemiAI Kaggle
+> CC50 cb_fe + cat_w=0.28 + **SI α=0.32**.
 
 **Аннотация:**
-Воспроизводимый ноутбук собирает сабмит из `data/train.csv` и `data/test.csv`.
-Лучший public score: **272.17** (`submission_phase_i_full_cb25.csv`).
-Ключевые компоненты: Phase H (ic65 + fr42 + mord55 + morgan25) + **full CatBoost IC50 w=0.25**, transductive CC50 (k=3), SI-инвариант (α=0.35).
+Лучший public score: **268.16** (`submission_phase_u_si_a32.csv`).
+Ключевые компоненты: transductive CC50 (192+4fe, w=0.70) + CC50 CatBoost на fe (cat_w=0.28), LGB IC50 w=0.55, **SI α=0.32**.
 
 ---
 
@@ -49,6 +39,7 @@ cells = [
 - [4. Эксперименты](#4-эксперименты)
   - [❌ Неудачные подходы](#-неудачные-подходы)
   - [✅ Финальный пайплайн](#-финальный-пайплайн)
+  - [🔮 Следующие направления](#-следующие-направления-roadmap)
 - [5. Обучение и submission](#5-обучение-и-формирование-submission)
 - [6. Результаты и визуализация](#6-результаты-и-визуализация)
 - [7. Заключение](#7-заключение)
@@ -66,7 +57,7 @@ cells = [
 
 Гипотеза исследования: для малого табличного датасета (n=751) выигрывают простые target-wise бленды специализированных голов, а не глубокий стеккинг.
 
-Путь к best: clustering → transductive CC50 → SI robust → IC50 CatBoost → fr → mordred → morgan → **full CatBoost IC50 blend**.
+Путь к best: … → full CatBoost → LightGBM IC50 → **ratio fe_* + LGB w=0.50**.
 
 SMILES в CSV нет — Morgan/Mordred реализованы через proxy-блоки RDKit-признаков.
 
@@ -96,6 +87,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from catboost import CatBoostRegressor
+from lightgbm import LGBMRegressor
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.ensemble import HistGradientBoostingRegressor
@@ -113,6 +105,7 @@ from run_local_signal_search import (
 )
 from run_phase_b_si_ic50 import frozen_cc50
 from run_phase_e_structural import blend_extra_head, feature_blocks
+from phase_k_fe import engineer_features
 from run_phase_i_kaggle_ideas import blend_ic50_full
 
 RANDOM_STATE = 42
@@ -122,17 +115,18 @@ N_JOBS = -1
 CATBOOST_THREADS = -1
 
 IC50_CAT_W = 0.65
-CC50_CAT_W = 0.25
+CC50_CAT_W = 0.28
 CC50_TRANS_K = 3
-CC50_BLEND_W = 0.60
+CC50_BLEND_W = 0.70
 SI_ROBUST_W = 0.30
-SI_ALPHA = 0.35
+SI_ALPHA = 0.32
 FR_IC50_W = 0.42
 MORDRED_IC50_W = 0.55
 MORGAN_IC50_W = 0.25
 FULL_IC50_W = 0.25
+LGB_IC50_W = 0.55
 SI_RATIO_EPS = 1e-3
-PUBLIC_BEST_SCORE = 272.17
+PUBLIC_BEST_SCORE = 268.16320
 
 SIZE_FEATURE_NAMES = [
     "LabuteASA", "MolMR", "Chi0", "MolWt", "ExactMolWt",
@@ -146,7 +140,7 @@ TARGET_COLS = ["IC50, mM", "CC50, mM", "SI"]
 SUBMISSION_COLS = ["IC50", "CC50", "SI"]
 ID_COL = "index"
 DATA_DIR = Path("data")
-OUTPUT_SUBMISSION_PATH = Path("submission_phase_i_full_cb25.csv")
+OUTPUT_SUBMISSION_PATH = Path("submission_phase_u_si_a32.csv")
 
 %matplotlib inline
 sns.set_theme(style="whitegrid")
@@ -233,7 +227,7 @@ plt.show()
 
 **Target-wise blend** — отдельные веса для IC50, CC50, SI вместо одной метамодели.
 
-**Мягкий SI-инвариант** — бленд прямого SI и ratio `CC50/IC50` с весом α=0.35.
+**Мягкий SI-инвариант** — бленд прямого SI и ratio `CC50/IC50` с весом α=**0.32** (Phase U).
 
 **Phase E fr-head** — CatBoost на `fr_*` (Morgan-proxy) для IC50.
 
@@ -242,6 +236,22 @@ plt.show()
 **Phase H morgan-head** — CatBoost на Morgan-proxy (`fr_*` + `FpDensityMorgan*`) для IC50 (w=0.25).
 
 **Phase I full-head** — CatBoost на всех 192 признаках только для IC50 (w=0.25).
+
+**Phase J LGB-head** — LightGBM на всех 192 признаках только для IC50 (algo diversity).
+
+**Phase K ratio fe** — синтетические отношения + LGB IC50; best **w=0.55**, public **269.09**.
+
+**Phase P cc50_fe** — ratio fe в transductive CC50; public **268.82**.
+
+**Phase Q cc50_blend_w** — blend_w=0.70; public **268.60**.
+
+**Phase S cc50_cb_fe** — CC50 CatBoost на fe; public **268.23**.
+
+**Phase T cc50_cat_w** — cat_w=0.28; public **268.19**.
+
+**Phase U si_a32** — SI α 0.35→**0.32**; public **268.16** (−0.03).
+
+**Phase V** — CC50-only KNN, physchem trans, SI Ridge meta: **si_meta +44 public**, physchem/knn закрыты.
 """
     ),
     md(
@@ -344,24 +354,150 @@ plt.show()
 **Результат:** public **272.88** (fr45) и OOF хуже ref для ic68/70.
 
 **Статус:** 🚫 Закрыто.
+
+#### Эксперимент #11: LightGBM IC50 head (Phase J) ✓
+
+**Гипотеза:** algo diversity (LGB поверх Phase I) даст новый IC50-сигнал, как full CatBoost.
+
+**Результат:** public **269.43** (`lgb_ic42`) vs Phase I **272.17** (−2.74); тренд ↑ w: ic15→ic42 монотонно улучшает LB.
+
+**OOF:** все LGB-варианты **хуже** ref Phase I (+0.18…+1.02) — OOF снова занижает public gain для IC50-heads.
+
+**Статус:** ✅ Промежуточный best; superseded by Phase K **w=0.50**.
+
+#### Эксперимент #12: Phase K ratio fe + LGB w-tune ✓
+
+**Гипотеза:** признаки-отношения (1.1) + рост веса LGB IC50-head.
+
+**Результат:** public **269.09** (`ratio_lgb55`); w-tune: 50→52→55→58, оптимум **w=0.55**.
+
+**Закрыто:** log1p+Ro5, interactions 2.2, LGB morgan 2.1; w>0.55 без gain.
+
+**Статус:** ✅ IC50 best до Phase P.
+
+#### Эксперимент #13: Phase P — PDF fe (fe_v2, ro5, mord, cc50_fe)
+
+**fe_v2_lgb55** (5 новых ratio в LGB): public **269.16** (+0.07).
+
+**ro5_head_lgb55** / **combo_mord_ro5**: **269.74** / **269.81** — регресс.
+
+**cc50_fe_lgb55** (4 ratio в transductive PCA/KNN): public **268.82** — **new best** (−0.27).
+
+**Статус:** ✅ superseded by Phase Q **blend_w=0.70**.
+
+#### Эксперимент #14: Phase Q — CC50 transductive tune
+
+**cc50_blend_w70**: public **268.60** — **new best** (−0.21).
+
+**cc50_blend_w65**: **268.66** — тоже лучше cc50_fe.
+
+**cc50_trans_k4**: **270.69** — регресс; k-tune закрыт.
+
+**Закрыто:** fe_v2/v1v2 в transductive, fe_only, log1p.
+
+**Статус:** ✅ superseded by Phase S **cc50_cb_fe**.
+
+#### Эксперимент #15: Phase S — CC50 fe в других ветках
+
+**cc50_cb_fe**: public **268.23** — **new best** (−0.37).
+
+**cc50_all_fe**: **268.26** — чуть хуже (clust_fe мешает).
+
+**lgb_w52**: **268.62** — хуже w70.
+
+**Закрыто:** pca_n≠20, clust_fe solo, blend_w micro.
+
+**Статус:** ✅ superseded by Phase T **cat_w=0.28**.
+
+#### Эксперимент #16: Phase T — cc50_cat_w tune
+
+**cc50_cat_w28**: public **268.19** — **new best** (−0.04).
+
+**cc50_cat_w30**: **268.20** — tie.
+
+**cc50_cat_w35**: **268.33** — OOF лучший, LB +0.10 (ловушка).
+
+**Статус:** ✅ superseded by Phase U **si_a32**.
+
+#### Эксперимент #17: Phase U — SI soft + CC50 fe
+
+**si_a32** (α=0.32): public **268.16** — **new best** (−0.03).
+
+**si_a38**: **268.25** — хуже a32.
+
+**cc50_fe_cc50only**: **268.66** — закрыто.
+
+**Статус:** ✅ Best — **si_a32, α=0.32**.
+
+#### Эксперимент #18: Phase V — новый сигнал (KNN / physchem / SI meta)
+
+**si_meta_ridge/knn**: public **312.70** (+44.5) — OOF −8.6, катастрофа (как isotonic).
+
+**si_meta_huber**: **269.47** (+1.31).
+
+**cc50_knn_k4**: **270.21** (+2.05).
+
+**physchem trans***: OOF +5…+16 — закрыто.
+
+**Статус:** ✅ Best без изменений — **si_a32**. SI learned blend **закрыт навсегда**.
 """
     ),
     md(
         """### ✅ Финальный пайплайн
 
-На основе экспериментов зафиксированы три принципа:
+На основе экспериментов зафиксированы принципы:
 
 1. **Простота > сложность** — фиксированные веса бленда, без метамодели.
-2. **IC50 — стек специализированных CatBoost-голов** (ext → fr → mordred → morgan → full).
-3. **SI не трогаем** — α=0.35, robust HGB; SI-blends и pIC50 на public ломают score.
+2. **IC50 — стек голов + algo diversity** (CatBoost ext/fr/mord/morgan/full → LightGBM full).
+3. **SI α=0.32** (Phase U); SI meta / pIC50 / жёсткий ratio на public ломают score.
+4. **OOF для IC50-heads ненадёжен** — public LB важнее локальной сетки на финальном этапе.
 
 ```text
-Phase H IC50 = morgan25( mord55( fr42( ic65_base ) ) )
-Phase I:     IC50 = 0.75*phase_h_ic50 + 0.25*CatBoost(all 192 features)
-CC50/SI — без изменений (transductive k=3 + SI α=0.35)
+Phase H IC50 = morgan25( mord55( fr42( ic65_base(cc50_trans=192+4fe) ) ) )
+Phase I:     IC50 = 0.75*phase_h + 0.25*CatBoost(all 192)
+Phase K:     IC50 = 0.45*phase_i + 0.55*LightGBM(192 + 4 ratio fe)
+CC50 — transductive (192+4fe, w=0.70) + CatBoost на fe (cat_w=0.28); **SI α=0.32**
 ```
 
 Далее — вспомогательные функции (одна функция на ячейку).
+"""
+    ),
+    md(
+        """### 🔮 Следующие направления (roadmap)
+
+Предложения по feature engineering и калибровке (статус на Phase V):
+
+| # | Идея | Оценка | Комментарий |
+|---|------|--------|-------------|
+| **1.1** | Признаки-отношения | ✅ | **269.29→269.09** (w=0.45→0.55) |
+| **1.2** | `log1p` на признаках | 🚫 | ratio_all хуже на +0.33 public |
+| **1.3** | Ro5-бинарники | 🚫 | отдельный head +0.65 public (Phase P) |
+| **1.4** | Перекалибровка весов LGB | ✅ | **w=0.55** best; насыщение |
+| **1.5** | Target-specific feature selection | ⏸ | после стабилизации w |
+| **1.6** | Ratio fe в CC50 transductive | ✅ | **268.82** |
+| **2.0** | SI α tune | ✅ | **268.16** (α=0.32) |
+| **2.1** | LGB в structural heads | 🚫 | lgb_morgan +0.36 public |
+| **2.2** | Pair interactions | 🚫 | inter_lgb48 +0.70 public |
+| **2.4** | SI Ridge meta | 🚫 | **312.70** (+44 public, Phase V) |
+| **2.5** | CC50-only KNN | 🚫 | +2.05 public (Phase V) |
+| **2.6** | Physchem transductive | 🚫 | OOF +5…+16 (Phase V) |
+| **3.x** | GNN / ChemBERTa / nested CV / BO / seed ens | ⏸ | см. §roadmap 3.x ниже |
+
+**Приоритет Phase M:** только то, что не требует SMILES и не ломает SI; w-grid **закрыт**.
+"""
+    ),
+    md(
+        """### Roadmap 3.x (оценка без SMILES / с ограничениями)
+
+| # | Идея | Вердикт | Комментарий |
+|---|------|---------|-------------|
+| **3.1** | GNN на молекular graphs | **Нет** | SMILES в CSV нет; пользователь отказался от SMILES-hunt |
+| **3.2** | ChemBERTa / MolBERT embeddings | **Нет** | Требует SMILES + тяжёлая интеграция; n=751 |
+| **3.3** | Nested CV | **Нет для LB-тюнинга** | OOF для IC50-heads уже систематически врёт; nested CV не починит public mismatch |
+| **3.4** | BO весов heads (Optuna) | **Осторожно** | Ручной w=0.55 нашли; BO на OOF обманет. Имеет смысл только **фиксированный grid 2–3 параметров** с public-подтверждением |
+| **3.5** | Seed ensemble + калибровка | **Нет** | seed_ensemble Phase H: 273.06 vs 272.44; калибровка ≈ isotonic (провал) |
+
+Единственный безопасный SI-слот: **α=0.30/0.31** микро. Новые сигналы без SMILES — **исчерпаны** (Phase V).
 """
     ),
     md(
@@ -663,20 +799,79 @@ Target-wise blend: clustering HGB, transductive KNN для CC50, CatBoost для
 """
     ),
     md(
+        """### LightGBM IC50-head (Phase J/K)
+
+Algo diversity: LightGBM на 192 + **ratio fe_*** (Phase K) поверх Phase I.
+"""
+    ),
+    code(
+        """def blend_ic50_lgb(
+    X_tr: pd.DataFrame,
+    X_te: pd.DataFrame,
+    y_tr: np.ndarray,
+    base_oof: np.ndarray,
+    base_test: np.ndarray,
+    weight: float,
+    random_state: int = RANDOM_STATE,
+) -> tuple[np.ndarray, np.ndarray]:
+    \"\"\"LightGBM на все 192 признака, только IC50.\"\"\"
+    oof = base_oof.copy()
+    test = base_test.copy()
+    kf = KFold(n_splits=N_SPLITS, shuffle=True, random_state=random_state)
+    test_acc = np.zeros(len(X_te))
+
+    for train_idx, valid_idx in kf.split(X_tr):
+        X_fit = X_tr.iloc[train_idx]
+        X_valid = X_tr.iloc[valid_idx]
+        y_fit = y_tr[train_idx, 0]
+
+        model = LGBMRegressor(
+            n_estimators=500,
+            learning_rate=0.03,
+            max_depth=6,
+            num_leaves=31,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            reg_alpha=0.1,
+            reg_lambda=1.0,
+            random_state=random_state,
+            n_jobs=N_JOBS,
+            verbose=-1,
+        )
+        model.fit(X_fit, y_fit)
+        pred_v = np.clip(model.predict(X_valid), 0, None)
+        pred_t = np.clip(model.predict(X_te), 0, None)
+
+        oof[valid_idx, 0] = (1 - weight) * base_oof[valid_idx, 0] + weight * pred_v
+        test_acc += pred_t / N_SPLITS
+
+    test[:, 0] = (1 - weight) * base_test[:, 0] + weight * test_acc
+    return oof, test
+"""
+    ),
+    md(
         """## 5. Обучение и формирование submission
 
-Последовательно: base → fr → mordred → morgan → **full CatBoost IC50** (seed=42).
+Последовательно: base (transductive на **192+4 ratio fe**) → fr → mordred → morgan → full CatBoost IC50 → **ratio fe + LightGBM IC50 w=0.55** (seed=42).
 
-Для побитового совпадения с leaderboard используем те же функции, что и в `run_local_signal_search.py` / `make_submission_phase_i.py`.
+Эталон: `make_submission_phase_u.py si_a32`.
 
 Полный прогон занимает несколько минут на CPU.
 """
     ),
     code(
         """%%time
+X_train_fe = engineer_features(X_train, ratios=True)
+X_test_fe = engineer_features(X_test, ratios=True)
 clear_fold_cache()
-base_cfg = frozen_cc50(ext_cols, ic50_cat_w=IC50_CAT_W, cc50_cat_w=CC50_CAT_W)
-base_oof, base_test = fit_oof(X_train, X_test, y_train, base_cfg, RANDOM_STATE)
+base_cfg = frozen_cc50(
+    ext_cols, ic50_cat_w=IC50_CAT_W, cc50_cat_w=CC50_CAT_W, cc50_blend_w=CC50_BLEND_W,
+)
+base_oof, base_test = fit_oof(
+    X_train, X_test, y_train, base_cfg, RANDOM_STATE,
+    X_transductive=X_train_fe, X_test_transductive=X_test_fe,
+    X_cc50_cb=X_train_fe, X_test_cc50_cb=X_test_fe,
+)
 blocks = feature_blocks_map
 
 oof_fr, test_fr = blend_extra_head(
@@ -691,9 +886,13 @@ oof_morgan, test_morgan = blend_extra_head(
     X_train, X_test, y_train, oof_mord, test_mord,
     blocks["morgan"], 0, MORGAN_IC50_W, RANDOM_STATE,
 )
-oof_final, test_final = blend_ic50_full(
+oof_full, test_full = blend_ic50_full(
     X_train, X_test, y_train, oof_morgan, test_morgan,
     FULL_IC50_W, RANDOM_STATE,
+)
+oof_final, test_final = blend_ic50_lgb(
+    X_train_fe, X_test_fe, y_train, oof_full, test_full,
+    LGB_IC50_W, RANDOM_STATE,
 )
 
 oof_score = competition_score(y_train, oof_final)
@@ -710,7 +909,7 @@ print(
 """
     ),
     code(
-        """ref_path = Path("submission_phase_i_full_cb25.csv")
+        """ref_path = Path("submission_phase_u_si_a32.csv")
 reference_submission = pd.read_csv(ref_path) if ref_path.exists() else None
 
 submission = sample_submission.copy()
@@ -733,7 +932,7 @@ if reference_submission is not None:
         - reference_submission[SUBMISSION_COLS].values
     )
     print(f"\\nСверка с эталоном LB: max|diff|={diff.max():.6f}")
-    assert diff.max() < 1e-4, "расхождение с эталонным сабмитом 272.17"
+    assert diff.max() < 1e-4, "расхождение с эталонным сабмитом 268.16"
 """
     ),
     md(
@@ -741,7 +940,7 @@ if reference_submission is not None:
 
 Ключевые вехи public leaderboard (источник: train OOF / Kaggle public).
 
-Лучший результат — **272.17** (Phase H + full CatBoost IC50 w=0.25).
+Лучший результат — **268.16** (cb_fe + cat_w=0.28 + **SI α=0.32** + LGB w=0.55).
 
 На графике OOF видно, что SI доминирует mean RMSE (~787 vs ~324 IC50).
 """
@@ -754,7 +953,14 @@ if reference_submission is not None:
     "Phase E fr42_ic65": 274.76,
     "Phase G mordred_w55": 272.99,
     "Phase H morgan_w25": 272.44,
-    "Phase I full_cb25": PUBLIC_BEST_SCORE,
+    "Phase I full_cb25": 272.17,
+    "Phase J lgb_ic42": 269.43,
+    "Phase K ratio_lgb55": 269.09,
+    "Phase P cc50_fe_lgb55": 268.82,
+    "Phase Q cc50_blend_w70": 268.60,
+    "Phase S cc50_cb_fe": 268.23,
+    "Phase T cc50_cat_w28": 268.19,
+    "Phase U si_a32": PUBLIC_BEST_SCORE,
 }
 labels = list(milestones.keys())
 scores = list(milestones.values())
@@ -796,13 +1002,14 @@ SI-ветки (Phase F transductive, CatBoost SI) на public ухудшали s
 Ноутбук воспроизводит лучший public пайплайн без готовых prediction CSV.
 
 ```text
-phase_h = morgan25( mord55( fr42( ic65_base ) ) )
-IC50    = 0.75*phase_h + 0.25*CatBoost(all 192)
+phase_h = morgan25( mord55( fr42( ic65_base(cc50_trans=192+4fe) ) ) )
+phase_i = 0.75*phase_h + 0.25*CatBoost(all 192)
+IC50    = 0.45*phase_i + 0.55*LightGBM(192 + ratio fe)
 ```
 
-Public best: **272.17**.
+Public best: **268.16**.
 
-Прогресс: clustering ~306 → **272.17** (−34.1 public).
+Прогресс: clustering ~306 → **268.16** (−37.8 public).
 
 ## 8. Воспроизведение
 
@@ -811,9 +1018,9 @@ Public best: **272.17**.
 1. `pip install -r requirements.txt`
 2. Положите CSV в `data/`
 3. **Kernel → Restart & Run All**
-4. Результат: `submission_phase_i_full_cb25.csv`
+4. Результат: `submission_phase_u_si_a32.csv`
 
-Зависимости зафиксированы в `requirements.txt` (numpy, pandas, scikit-learn, catboost, matplotlib, seaborn).
+Зависимости: numpy, pandas, scikit-learn, catboost, **lightgbm**, matplotlib, seaborn.
 """
     ),
     code(
@@ -826,7 +1033,7 @@ try:
         ip.run_line_magic("load_ext", "watermark")
         ip.run_line_magic(
             "watermark",
-            "-p numpy,pandas,sklearn,catboost,matplotlib,seaborn --python",
+            "-p numpy,pandas,sklearn,catboost,lightgbm,matplotlib,seaborn --python",
         )
     else:
         raise ImportError
